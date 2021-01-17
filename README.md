@@ -5,9 +5,11 @@ Released under the GPL v3
 Requirements:
    - zmac macro assembler <http://48k.ca/zmac.html>  
    - mtools <https://www.gnu.org/software/mtools/>  
-   - Z80 Emulator <http://www.z80.info/z80emu.htm#EMU_CPU_W32>  
-	
-**Build:**  
+   - Z80 Emulator for debugging <http://www.z80.info/z80emu.htm#EMU_CPU_W32>  
+
+The Z80 Emulator is a Windows program, but works fine under Wine on Linux.
+
+**Build:**
 Should be as simple as typing 'make'. It will generate
 a 720k DD disk image that can be booted in ZEMU.
 
