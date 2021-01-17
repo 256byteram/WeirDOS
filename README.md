@@ -9,10 +9,10 @@ Requirements:
 
 The Z80 Emulator is a Windows program, but works fine under Wine on Linux.
 
-**Build:**
+**Build:**  
 Should be as simple as typing 'make'. It will generate
 a 720k DD disk image that can be booted in ZEMU.
 
-**TODO:**  
+**TODO:**
    - Need to make a CLI. At the moment I'm using ZSID.COM from CP/M Plus.
    - Debug on real hardware
