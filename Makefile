@@ -3,7 +3,6 @@
 #
 # Makefile
 #
-#
 # A Disk Operating System for Z80 microcomputers, implementing
 # the CP/M 2.2 API and FAT12/FAT16 filesystems.
 #
