@@ -347,6 +347,24 @@ setdma:	sded	dmaadr		; Easy
 
 
 	;
+	; Function 23h (35)
+	;
+	; Return record count in FCB
+	;
+fsize:	ldx	a, FCBLEN+1	; Divide FCBLEN by 128
+	ldx	l, FCBLEN+2
+	ldx	h, FCBLEN+3
+	ora	a		; clear carry
+	rarr	h
+	rarr	l
+	rar
+	stx	a, FCBRN
+	stx	l, FCBRN+1
+	stx	h, FCBRN+2
+	ret
+	
+
+	;
 	; Calculate the CR/EX/S2 data from the random record
 	; FCB entry.
 	;

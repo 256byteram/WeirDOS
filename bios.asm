@@ -36,7 +36,6 @@ TRUE	equ	NOT FALSE
 
 REAL	equ	TRUE	; True to build the disk version
 			; False for bootstrapping version
-DEBUG	equ	FALSE	; Debugging output
 
 
 ROMBIOS	equ	0FFF8h	; Entry to ROM BIOS
@@ -373,11 +372,7 @@ getbuf	lxi	h, datab
 ; HEAD = (LBA / SPT) MOD HEADS
 ; SECT = LBA MOD SPT
 ;
-tochs:	
-	if	DEBUG
-	call	prreg
-	endif
-	xra	a
+tochs:	xra	a
 	ora	e
 	ora	d
 	jrnz	tochs32
@@ -398,11 +393,6 @@ chs16:	pushix
 	mov	c, a		; move head to C (remainder in A)
 	pop	psw		; Restore sector 
 	popix
-	
-	if	DEBUG
-	jmp	prreg
-	endif
-	
 	ret
 	
 	
@@ -452,7 +442,7 @@ div32l:	dad	h
 ; Debug
 ;
 ;
-	if	DEBUG
+	ifdef   DEBUG
 prreg	push	h
 	push	d
 	push	b
@@ -512,6 +502,7 @@ fcblen	equ	$-fcbi
 
 	; Boot message
 bmesg:
+        db	cr		; To start NOTICE on blank line
 	incbin	NOTICE.TXT
 	db	0
 	; Boot stack can overwrite banner

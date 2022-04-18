@@ -240,6 +240,13 @@ IM2	MACRO
 	DB	0EDH,5EH
 	ENDM
 
+B       EQU     0
+C       EQU     1
+D       EQU     2
+E       EQU     3
+H       EQU     4
+L       EQU     5
+A       EQU     7
 
 BC	EQU	0
 DE	EQU	2

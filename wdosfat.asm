@@ -74,8 +74,7 @@ freef:	lhld	ctotal		; Compare against total clusters in disk
 	mov	l, c		; Copy counter to HL
 	mov	h, b
 	call	getfat		; Get value at that cluster
-	xra	a		; Is the entry zero?
-	ora	l
+	mov	a, l		; Is the entry zero?
 	ora	h
 	rz			; Return with BC if entry is zero
 	inx	b		; Next cluster
@@ -188,8 +187,7 @@ gclust:	lbcd	index		; Target index to BC
 	ldx	d, FCBIDX+1
 	ldx	l, FCBCUR
 	ldx	h, FCBCUR+1
-	xra	a		; Current cluster valid?
-	ora	l
+	mov	a, l		; Current cluster valid?
 	ora	h
 	jrnz	.3
 	ldx	l, FCBCL	; Restart cluster chain
@@ -214,7 +212,7 @@ gclust:	lbcd	index		; Target index to BC
 	stx	d, FCBIDX+1
 	stx	l, FCBCUR	; Store new cluster associated with index
 	stx	h, FCBCUR+1
-	;xra	a		; No error. A is already 0
+	xra	a		; No error
 	ret
 	
 .4:	ldx	l, FCBCL	; Restart cluster chain if less than
@@ -477,3 +475,5 @@ getidx:	lxi	h, bshf		; Block shift factor
 	mov	m, a
 	xra	a
 	ret
+
+

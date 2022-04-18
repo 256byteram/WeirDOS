@@ -61,6 +61,29 @@ select: push	d		; Keep E
 	shld	dpbadr
 	jmp	login		; Log new disk in
 
+
+	
+	;
+	; Function 1Fh (31)
+	;
+	; Return address of (fake) DPB
+	;
+getdpb:	lxi	h, dpb
+	shld	rval
+	ret
+	
+dpb:	dw	9*4		; Records per track
+	db	3		; Block shift
+	db	7		; Block mask
+	db	0		; Extent mask
+	dw	1440*4-1	; Blocks on disk -1
+	dw	111		; Root directory entries
+	db	0FFh, 0FFh	; Directory allocation map
+	dw	0		; Checksum
+	dw	0		; Reserved tracks
+	
+	
+
 	; Disk read. Flushes currently loaded sectors if needed,
 	; reads requested sector of selected partition.
 	;

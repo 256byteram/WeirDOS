@@ -53,13 +53,16 @@ HIDDSEC	equ	0		; Sectors before start of partition
 				
 DBUFF	equ	ENTRY-512
 
+; CRT ports
 CRT$DAT	equ	020h	; console data
 CRT$ST	equ	021h	; console status
 CRT$CTL	equ	021h	; console control
 
-CRT$TXD	equ	01h	; transmit flag mask
-CRT$RXD	equ	02h	; receive flag mask
+; CRT flag bits
+CRT$TXD	equ	0	; transmit flag mask
+CRT$RXD	equ	1	; receive flag mask
 
+; FDC ports
 FD$CMD	equ	008h	; WD177x command
 FD$STAT	equ	008h	; status
 FD$TRK	equ	009h	; track
@@ -77,17 +80,17 @@ FD$READ	equ	088h
 FD$WRIT	equ	0A8h
 FD$WTRK	equ	0F0h
 FD$IRQ	equ	0D0h
-; FDC status register
-FD$BUSY	equ	001h
-FD$DRQ	equ	002h
-FD$LOST	equ	004h
-FD$CRC	equ	008h
-FD$RNF	equ	010h
-FD$REC	equ	010h
-FD$WF	equ	020h
-FD$RT	equ	040h
-FD$WP	equ	040h
-FD$NR	equ	080h
+; FDC status register bits
+FD$BUSY	equ	0
+FD$DRQ	equ	1
+FD$LOST	equ	2
+FD$CRC	equ	3
+FD$RNF	equ	4
+FD$REC	equ	4
+FD$WF	equ	5
+FD$RT	equ	6
+FD$WP	equ	6
+FD$NR	equ	7
 ; Tarbell control port
 TB$DENS	equ	008h
 TB$DS0	equ	010h
@@ -234,8 +237,8 @@ load:	push	b
 	
 nfound:	lxi	d, nberr
 hang:	in	CRT$ST
-	ani	CRT$TXD
-	jz	hang
+	bit	CRT$TXD,A
+	jrz	hang
 	ldax	d
 	inx	d
 	ora	a
@@ -269,7 +272,7 @@ seek1:	out	FD$CTRL		; Set side
 	mov	a, l		; seek to L (cylinder)
 	out	FD$DATA
 fdwait:	in	FD$STAT
-	ani	FD$BUSY
+        bit	FD$BUSY,A
 	jrnz	fdwait
 	mvi	a, FD$SEEK
 	out	FD$CMD
@@ -278,12 +281,18 @@ fdwait:	in	FD$STAT
 	lhld	dma
 	out	FD$CMD
 rdwait:	in	FD$STAT
-	ani	FD$DRQ
+	bit     FD$RNF,A
+        jrnz    rnfhlt
+	bit	FD$DRQ,A
 	jrz	rdwait
 	inir			; Read 512 bytes
 	inir
 	xra	a
 	ret
+	
+rnfhlt:	ld	de, rderr
+	jr	hang
+	
 
 ; Divide HL by A, remainder in A. Saves BC
 ;
@@ -302,11 +311,19 @@ div16l:	dad	h
 	pop	bc
 	ret
 
-rderr:	db	"Error loading system",0
-nberr:	db	"System not found",0
+rderr:	db	"Error loading system",13,10,0
+nberr:	db	"System not found",13,10,0
 osname:	db	"WDOS    SYS"
 
-	defs	100		; Calculated manually argh
+
+	if	BIN
+	rept    (ENTRY+SECSIZE-2)-$
+	db	0
+	endm
+	else
+	org	(ENTRY+SECSIZE-2)
+	endif
+	
 	dw	0AA55h
 	end
 	

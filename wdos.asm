@@ -47,13 +47,11 @@
 FALSE	equ	0
 TRUE	equ	NOT FALSE
 
-BIN	equ	TRUE	; Fill area between DOS and BIOS for binaries
-DEBUG	equ	FALSE	; Enable debugging routines
-
 MEMTOP	equ	64	; Top of addressable memory (up to 64k)
 CMD	equ	100h	; Load shell to here
 
 CTRLC	equ	3
+CTRLS	equ	19
 CTRLZ	equ	26
 
 BS	equ	8
@@ -191,10 +189,11 @@ jtab:	dw	reload		;  0 00h Warm Boot - wdoswarm.asm
 	dw	unsupp		; 28 1Ch Set current disk to R/O
 	dw	unsupp		; 29 1Dh Return bitmap of R/O drives
 	dw	unsupp		; 30 1Eh Set file attribs
-	dw	unsupp		; 31 1Fh Retrieve DPB
+	dw	getdpb		; 31 1Fh Retrieve DPB
 	dw	unsupp		; 32 20h Get/set user number
 	dw	rdrnd		; 33 21h Read Random - wdosfile.asm
 	dw	wrrnd		; 34 22h Write random - "
+	dw	fsize		; 35 23h File size - "
 JTOTAL	equ	($-jtab)/2+2
 	
 lstack:	dw	0,0,0,0		; Local stack
@@ -287,7 +286,7 @@ osret:	popiy			; Restore IX/IY
 	ret
 	
 unsupp:	
-	if	DEBUG
+	ifdef	DEBUG
 	call	prreg
 	mvi	c, '!'
 	call	list
@@ -361,7 +360,7 @@ clrhl:	xra	a
 	; Debug
 	;
 	;
-	if	DEBUG
+	ifdef	DEBUG
 prreg:	push	h
 	push	d
 	push	b
@@ -382,6 +381,7 @@ prreg:	push	h
 .2:	dcx	h
 	djnz	.1
 
+	call    crlf
 	pop	psw
 	pop	b
 	pop	d
@@ -425,7 +425,7 @@ filem:	db	'file '
 ronlym:	db	'read only$'
 fmtm:	db	'format$'
 
-fcb:	db	0,'CMD     COM'
+fcb:	db	0,'CLI     COM'
 	dw	0,0,0,0,0,0,0,0,0,0,0,0
 fcbi:	db	0,'           '
 	dw	0,0

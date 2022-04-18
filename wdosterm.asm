@@ -46,10 +46,18 @@ readera	call	reader		; Get character as requrested
 	
 
 	;
-	; Function 03h (3)
+	; Function 02h (2)
 	;
 	; Console output
-cout:	mov	c, e
+cout:	call	const
+	jrz	.1
+.wait	call	conin
+	cpi	CTRLS		; XOFF
+	jrz	.wait
+	cpi	CTRLC		; ^C
+	jmp	exit		; Terminate program
+.1:	lded	param
+	mov	c, e
 	jmp	conout
 	
 	;

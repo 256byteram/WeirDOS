@@ -31,6 +31,10 @@
 	; Function 0
 	; Reload shell, execute.
 	;
+exit:	mvi	c, '^'		; Print ^C when user terminates command
+	call	conout
+	mvi	c, 'C'
+	call	conout
 reload:	lxi	sp, stack
 	call	crlf
 
@@ -44,12 +48,7 @@ reload:	lxi	sp, stack
 	ora	a
 	jz	nofile		; Can't load file
 	
-selok:	lxi	d, USRFCB	; Clear default FCB's
-	lxi	h, fcbi
-	lxi	b, 36
-	ldir
-	
-	lxi	d, fcb
+selok:	lxi	d, fcb
 	mvi	c, 15		; Open
 	call	wdos
 	inr	a		; FFh becomes 0
