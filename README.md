@@ -17,6 +17,7 @@ a 720k DD disk image that can be booted in ZEMU.
 Building with 'make debug' will include the -DDEBUG flag when assembling.
 
 **Command Line Interface:**
+
 The CLI is extremely basic at the moment. The following commands are implemented:
    - TYPE
    - DIR

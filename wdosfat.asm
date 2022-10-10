@@ -29,9 +29,9 @@
 	; 
 append:	ldx	c, FCBCUR	; Get current cluster
 	ldx	b, FCBCUR+1
-	mov	a, c		; Current cluster zero?
+	mov	a, c		; Current cluster non-zero?
 	ora	b
-	jrnz	.1		; Good to append new cluster
+	jrnz	.1		; Yes, append new cluster
 	; start new file
 	call	freef		; BC = 0, start search at beginning
 	rnz			; Return on disk full
@@ -39,10 +39,23 @@ append:	ldx	c, FCBCUR	; Get current cluster
 	stx	b, FCBCUR+1
 	stx	c, FCBCL	; Update DOS cluster
 	stx	b, FCBCL+1
+
+	push 	b		; Keep empty cluster
+	call	dflush		; Flush any potential stale data
+	xra	a		; Load that sector
+	sta	recrd
+	call	crecrd		; Calculate the sector to DEHL
+	shld	dsect		; 'pretend' we loaded that sector
+	sded	dsect+2
+	mvi	a, 01Ah		; Sector flushed with EOF
+	mvi	b, 0		; 256 bytes
+	lded	datadr
+	call	fill		; 512 bytes total
+	call	fill
 	
-	mov	l, c		; Write -1 to that cluster
-	mov	h, b
-	jr	.2
+	lxi	d, -1
+	pop	h
+	jmp	setfat
 	
 .1:	push	b		; Keep FCBCUR
 	call	freef		; Find next free location after it
@@ -61,7 +74,7 @@ append:	ldx	c, FCBCUR	; Get current cluster
 	push	b		; Keep the new cluster value
 	call	setfat
 	pop	h		; Write -1 to new cluster
-.2:	lxi	d, -1		; Write EOF cluster
+	lxi	d, -1		; Write EOF cluster
 	jmp	setfat		; Return through setfat
 
 	;
@@ -95,11 +108,41 @@ filrec:	call	selfcb		; Select disks
 	rnz			; Return on EOF
 	;jmp	grecrd		; Get record from cluster if not EOF
 				; and return
-	
+
+	;
 	; Load from disk the sector containing the record in [recrd],
 	; in the cluster [IX+FCBCUR]. Returns HL containing the buffer
 	; address of the requested record.
-grecrd:	ldx	l, FCBCUR
+	;
+grecrd:	call	crecrd		; Calculate the record to load
+	xra	a
+	pushix
+	call	dskrd		; Read it
+	popix
+	rnz
+	lxi	h, 1		; Shift 1 in HL BSF times
+	lda	bshf
+	mov	b, a
+.4:	dad	h
+	djnz	.4
+	dcx	h		; minus one becomes mask
+	lda	recrd		; Only need low byte
+	ana	l		; Mask record
+	lxi	h, 0		; multiply A by 128 to HL
+	rar
+	rarr	l
+	mov	h, a		; Record offset in HL
+	lded	datadr		; Data address
+	dad	d		; Add to record address
+	xra	a		; no error
+	ret
+	
+		
+	; Calculate the sector to load for the current record
+	; in [recrd] in the cluster [IX+FCBCUR].
+	; 
+	; Returns with DEHL containing the LBA of the sector.
+crecrd:	ldx	l, FCBCUR
 	ldx	h, FCBCUR+1
 	dcx	h		; Cluster is always offset by 2
 	dcx	h
@@ -148,27 +191,6 @@ grecrd:	ldx	l, FCBCUR
 	xchg
 	dadc	b
 	xchg
-	
-	xra	a
-	pushix
-	call	dskrd		; Read it
-	popix
-	rnz
-	lxi	h, 1		; Shift 1 in HL BSF times
-	lda	bshf
-	mov	b, a
-.4:	dad	h
-	djnz	.4
-	dcx	h		; minus one becomes mask
-	lda	recrd		; Only need low byte
-	ana	l		; Mask record
-	lxi	h, 0		; multiply A by 128 to HL
-	rar
-	rarr	l
-	mov	h, a		; Record offset in HL
-	lded	datadr		; Data address
-	dad	d		; Add to record address
-	xra	a		; no error
 	ret
 
 	; Calculate the cluster indexed from the number at [index]
@@ -269,7 +291,7 @@ setf16:	push	d		; Keep data
 	inx	h
 	mov	m, b
 	; Set flag in stale
-setfx:	lhld	stale
+setfx:	lxi	h, stale
 	mvi	a, 2
 	ora	m
 	mov	m, a
@@ -473,6 +495,18 @@ getidx:	lxi	h, bshf		; Block shift factor
 	mov	m, c
 	inx	h
 	mov	m, a
+	
+;	ifdef	DEBUG
+;	mvi	c, '@'
+;	call	conout
+;	lda	index+1
+;	call	phex
+;	lda	index
+;	call	phex
+;	call	prfcb
+;	call	dbcrlf
+;	endif
+	
 	xra	a
 	ret
 

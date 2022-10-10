@@ -29,7 +29,7 @@
 	maclib	Z80
 
 MEMTOP	equ	64	; Top of addressable memory (up to 64k)
-TOTAL	equ	1	; Total number of drives in system
+TOTAL	equ	2	; Total number of drives in system
 
 FALSE	equ	0
 TRUE	equ	NOT FALSE
@@ -99,6 +99,32 @@ TB$DS0	equ	010h
 TB$DS1	equ	020h
 TB$SIDE	equ	040h
 TB$DRQ	equ	080h
+
+; Fixed disk ports
+HD$LOW	equ	0C8h	; low byte of parameter
+HD$HIGH	equ	0C9h	; high byte of parameters
+HD$REG	equ	0CAh	; Register select
+
+; Fixed disk registers
+HD$CMD	equ	000h	; Command (8-bit)
+HD$STAT	equ	008h	; Status (8-bit)
+HD$EX1	equ	009h	; Extended Status 1 (8-bit)
+HD$EX2	equ	00Ah	; Extended Status 2 (8-bit)
+HD$DMA	equ	010h	; DMA address (16-bit)
+HD$BANK	equ	011h	; DMA bank (8-bit)
+HD$SEL	equ	018h	; Drive select (8-bit)
+HD$CLK	equ	019h	; Clock speed select HD/8"/5"/3" (8-bit)
+HD$CYL	equ	020h	; Cylinder select (16-bit)
+HD$HEAD	equ	021h	; Head select (8-bit)
+HD$TRK	equ	022h	; Track select (16-bit)
+HD$DEN	equ	023h	; Density select (8-bit)
+HD$SECT	equ	024h	; Sector select (16-bit)
+
+; Fixed disk commands
+HD$NULL	equ	080h	; NULL command (CHS enabled)
+HD$READ	equ	0C1h	; Read command (CHS, ignore common memory start)
+HD$WRIT	equ	0C2h	; Write command
+
 ; DPB offsets
 DPB$SIZ	equ	49	; Size in bytes of each DPB
 DPB$OFF	equ	11	; Offset in bytes of DPB from start of sector
@@ -128,6 +154,14 @@ wboote	jmp	wboot		; warm start
 	jmp	read		; read disk
 	jmp	write		; write disk
 	jmp	listst		; return list status
+
+driver	dw	adrv, bdrv		; Points to available drivers
+
+;adrv	dw	fsel, fseek, fread, fwrite	; Routine table for floppy drive
+adrv	dw	hsel, hseek, hread, hwrite	; Routine table for hard drive
+bdrv	dw	hsel, hseek, hread, hwrite	; Routine table for hard drive
+
+current	dw	adrv			; Current drive table in use
 
 boot	lxi	sp, bstack
 	xra	a
@@ -188,7 +222,7 @@ reader	lda	IOBYTE
 ; CRT input from keyboard
 crtin	in	CRT$ST
 	and	CRT$RXD
-	jz	conin
+	jz	crtin
 	in	CRT$DAT
 	ret
 	
@@ -200,14 +234,14 @@ crtstat	in	CRT$ST
 ; CRT output
 crtout	in	CRT$ST
 	ani	CRT$TXD
-	jz	conout
+	jz	crtout
 	mov	a, c
 	out	CRT$DAT
 	ret
 
 ; Serial input
 serin	in	TTY$ST
-	and	TTY$RXD
+	ani	TTY$RXD
 	jz	serin
 	in	TTY$DAT
 	ret
@@ -220,7 +254,7 @@ serst	in	TTY$ST
 ; Serial output
 serout	in	TTY$ST
 	ani	TTY$TXD
-	jz	conout
+	jz	serout
 	mov	a, c
 	out	TTY$DAT
 	ret
@@ -232,9 +266,41 @@ print	ldax	d
 	rz
 	push	d
 	mov	c, a
-	call	crtout
+	call	conout
 	pop	d
 	jmp	print
+
+
+	; Dispatch for select disk
+seldsk	lhld	current
+	lxi	d, 0		; Entry 0
+	jr	go
+
+
+	; Seek routine dispatch
+seek:	push	d		; Push LBA to stack (DE and HL are clobbered)
+	push	h
+	lhld	current		; Current driver table
+	lxi 	d, 2		; Entry 1
+	jr	go
+	
+	; Read routine dispatch
+read:	lhld	current		; Current driver table
+	lxi	d, 4		; Entry 2
+	jr	go
+
+	; Write routine dispatch
+write:	lhld	current		; Current driver table
+	lxi	d, 6		; Entry 3
+	;jr	go	
+	; Fall through
+
+go	dad	d
+	mov	e, m		; Get the address of seek routine
+	inx	h
+	mov	d, m
+	xchg			; Go
+	pchl
 
 	;
 	; SELDSK selects a new device to access
@@ -245,38 +311,74 @@ print	ldax	d
 	;                    or address of DPB location
 	;
 	
+hsel	mvi	a, HD$CMD	; Send a NULL command to the controller
+	out	HD$REG
+	mvi	a, HD$NULL
+	out	HD$LOW
+
+	mvi	a, HD$SEL
+	out	HD$REG
+	mov	a, c		; Select correct disk
+	out	HD$LOW
+	
+	mvi	a, HD$CMD	; Send a NULL command to the controller
+	out	HD$REG
+	mvi	a, HD$NULL
+	out	HD$LOW
+	; Fall through to DPB calculation
+	
 	; Calculate DPB buffer address
-seldsk	lxi	d, DPBSIZ
-	lxi	h, 0		; Default reutrn, offset accumulator
+fsel	lxi	h, 0		; Default error state
 	mov	a, c
 	cpi	TOTAL		; Total drives in BIOS
 	rnc			; Invalid drive
-	ora	a
-	jz	sel0		; Select disk 0 (no offset)
-	mov	b, c		; Count in B
-sellp	dad	d
-	djnz	sellp
-sel0	lxi	d, dpbtab	; Offset + address
-	dad	d
-	shld	curdpb		; Store for CHS conversion
-	ret
 	
+	lxi	h, driver
+	lxi	d, 2		; 2 bytes per entry
+.l1	ora	a		; Compare to 0 at start of loop
+	jrz	.sel1
+	dcr	a		; Decrement count
+	dad	d		; Increment pointer
+	jr	.l1
+	
+.sel1	mov	a, m		; Get the address table pointed to
+	inx	h
+	mov	h, m
+	mov	l, a
+	shld	current		; Store as current
+	
+	mov	a, c		; Current disk in acc
+	lxi	h, dpbtab	; Start here
+	lxi	d, DPBSIZ	; Increment by this much
+.l2	ora	a
+	jrz	.sel2
+	dcr	a
+	dad	d
+	jr	.l2
+
+.sel2	shld	curdpb		; Store for CHS conversion
+	ret
+
+
 	;
-	; Seek to LBA sector in DEHL
+	; Floppy drive seek to LBA sector on stack
 	;
-seek	call	tochs
+fseek	pop	h		; Pop DEHL address off stack from dispatch
+	pop	d
+	call	tochs
 	out	FD$SEC
 	xra	a
 	ora	c		; Head
 	mvi	a, TB$DENS	; double density
-	jrz	seek1
+	jrz	fseek1
 	mvi	a, TB$DENS OR TB$SIDE
-seek1	out	FD$CTRL		; Set side
+fseek1	out	FD$CTRL		; Set side
 	mov	a, l		; seek to L (cylinder)
 	out	FD$DATA
 	call	fdwait
 	mvi	a, FD$SEEK
 	out	FD$CMD
+	xra	a
 	ret
 
 	;
@@ -288,7 +390,8 @@ fdwait:	in	FD$STAT
 	ret
 	
 	
-	
+	; Floppy drive read
+	;
 	; Read absolute sector to a local buffer, return
 	; with that buffer address.
 	;
@@ -300,8 +403,9 @@ fdwait:	in	FD$STAT
 	; Buffer size needs to accommodate a single sector.
 	; WDOS assumes 512-byte media but can be expanded to use
 	; the size indicated in the DPB (TODO).
-read:	call	getbuf
+fread:	call	getbuf
 	push	h
+
 	call	fdwait
 	lxi	b, FD$DATA	; B = 0 (counts 256) C = port
 	mvi	a, FD$READ
@@ -320,6 +424,7 @@ rdwait:	in	FD$STAT
 rdx:	pop	h
 	ret
 	
+	; Floppy drive write
 	;
 	; Write sector to currently selected drive.
 	; Seek needs to be called before hand.
@@ -329,8 +434,9 @@ rdx:	pop	h
 	; Returns with: A = 0 no error, 1 = error, 2 = read-only
 	;
 	; 
-write	call	getbuf
+fwrite	call	getbuf
 	push	h
+	
 	call	fdwait
 	lxi	b, FD$DATA	; B = 0, C = port
 	mvi	a, FD$WRIT
@@ -352,8 +458,6 @@ wrwait:	in	FD$STAT
 	xra	a
 wrx:	pop	h
 	ret
-	
-	ret
 
 	; Determine what buffer to store data to
 getbuf	lxi	h, datab
@@ -361,6 +465,94 @@ getbuf	lxi	h, datab
 	rz
 	lxi	h, fatb
 	xra	a
+	ret
+
+
+	;
+	; Fixed drive seek to LBA sector on stack
+	;
+hseek	pop	h		; Pop DEHL address off stack from dispatch
+	pop	d
+	call	tochs		; Returns: Cyl in HL, sector in A, head in C
+	mov	b, a
+	
+	mvi	a, HD$CYL	; Select cylinder register
+	out	HD$REG
+	mov	a, l
+	out	HD$LOW
+	mov	a, h
+	out	HD$HIGH
+	
+	mvi	a, HD$HEAD	; Select head register
+	out	HD$REG
+	mov	a, c
+	out	HD$LOW
+	
+	mvi	a, HD$SECT	; Select sector register
+	out	HD$REG
+	mov	a, b
+	out	HD$LOW
+	
+	xra	a
+	ret
+	
+	; Fixed drive read
+	;
+	; Read absolute sector to a local buffer, return
+	; with that buffer address.
+	;
+	; Enters with: A = 0 = data buffer. 1 = FAT buffer
+	;            
+	; Returns with: A = 0 for no error, 1 on error
+	;               HL = address of buffer
+	;
+	; Buffer size needs to accommodate a single sector.
+	; WDOS assumes 512-byte media but can be expanded to use
+	; the size indicated in the DPB (TODO).
+hread:	call	getbuf
+	mvi	a, HD$DMA	; Set DMA address
+	out	HD$REG
+	mov	a, l
+	out	HD$LOW
+	mov	a, h
+	out	HD$HIGH
+	mvi	a, HD$CMD
+	out	HD$REG
+	mvi	a, HD$READ
+	out	HD$LOW
+	
+	mvi	a, HD$STAT
+	out	HD$REG
+	in	HD$LOW
+	ora	a
+	ret
+	
+	; Fixed drive write
+	;
+	; Write sector to currently selected drive.
+	; Seek needs to be called before hand.
+	;
+	; Enters with: A = 0 = data buffer, 1 = FAT buffer
+	;
+	; Returns with: A = 0 no error, 1 = error, 2 = read-only
+	;
+	; 
+hwrite	call	getbuf
+	mvi	a, HD$DMA	; Set DMA address
+	out	HD$REG
+	mov	a, l
+	out	HD$LOW
+	mov	a, h
+	out	HD$HIGH
+	mvi	a, HD$CMD
+	out	HD$REG
+	mvi	a, HD$WRIT
+	out	HD$LOW
+	
+	mvi	a, HD$STAT
+	out	HD$REG
+	in	HD$LOW
+	ora	a
 	ret
 
 
@@ -372,14 +564,14 @@ getbuf	lxi	h, datab
 ; HEAD = (LBA / SPT) MOD HEADS
 ; SECT = LBA MOD SPT
 ;
-tochs:	xra	a
-	ora	e
+tochs:	mov	a, e
 	ora	d
 	jrnz	tochs32
 	; 16-bit division because of 16-bit LBA (quicker)
-	ora	l		; Don't divide by zero
+	mov	a, l		; Don't divide by zero
 	ora	h
 	jrnz	chs16
+	mov	c, a		; C = 0
 	inr	a		; DE (cyl), C (head) = 0, A (sect) = 1
 	ret
 chs16:	pushix
@@ -420,7 +612,7 @@ div16l:	dad	h
 		
 ; Divide DEHL by A.
 ; Remainder in A
-div32:	push	bc
+div32:	;push	bc
 	mov	c, a
 	xra	a
 	mvi	b, 32
@@ -434,7 +626,7 @@ div32l:	dad	h
 	sub	c
 	inc	l
 	djnz	div32l
-	pop	bc
+	;pop	bc
 	ret
 
 ;
@@ -457,7 +649,7 @@ prrl	mov	a, m
 	ani	1
 	jz	prrl1
 	mvi	c, ' '
-	call	crtout
+	call	conout
 	lxi	d, 4
 	dad	d
 prrl1	dcx	h
@@ -488,7 +680,7 @@ phex1	ani	00Fh		; Mask off high nibble
 	aci	040h
 	daa
 	mov	c, a		; Print it
-	jmp	crtout
+	jmp	conout
 	endif
 	
 	if	NOT REAL
@@ -510,15 +702,16 @@ curdpb	dw	0
 	; BIOS Stack
 	dw	0,0,0,0,0,0,0,0
 bstack	equ	$
-; Disk Parameter Blocks
+
+; Disk Parameter Blocks and buffers
 ;
 ; These are left uninitialized and filled by WDOS from
 ; the current media. 49 bytes need to be allocated per
 ; drive.
 ;
 	; Data buffers
-datab	ds	512	; Data buffer
-fatb	ds	512	; FAT buffer
+datab	equ	$	; Data buffer
+fatb	equ	datab+512	; FAT buffer
 	; The rest of RAM is allocated to DPB blocks
-dpbtab	equ	$
+dpbtab	equ	fatb+512
 	end

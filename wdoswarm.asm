@@ -38,17 +38,12 @@ exit:	mvi	c, '^'		; Print ^C when user terminates command
 reload:	lxi	sp, stack
 	call	crlf
 
-	lda	CDISK		; Get current disk (set by BIOS)
-	mov	e, a		; To E
-	call	select		; Select it
-	ora	a
-	jz	selok		; Select okay
-	mvi	e, 0		; Select A:
-	call	select
-	ora	a
-	jz	nofile		; Can't load file
+	lxi	h, fcb		; Default FCB
+	lxi	d, fcbi		; Intermediate FCB
+	lxi	b, 36
+	ldir
 	
-selok:	lxi	d, fcb
+selok:	lxi	d, fcbi
 	mvi	c, 15		; Open
 	call	wdos
 	inr	a		; FFh becomes 0
@@ -58,7 +53,7 @@ selok:	lxi	d, fcb
 	call	wdos
 	lxi	d, CMD		; Load to here
 rloop:	push	d
-	lxi	d, fcb
+	lxi	d, fcbi
 	mvi	c, 20		; Read next
 	call	wdos
 	pop	d
@@ -71,7 +66,7 @@ rloop:	push	d
 	jnz	nofile
 	jmp	rloop
 
-goshel:	lxi	d, fcb		; Close file
+goshel:	lxi	d, fcbi		; Close file
 	mvi	c, 16
 	call	wdos
 	jmp	CMD		; Jump to it

@@ -157,6 +157,15 @@ PART0	equ	454		; Bytes offset for partition begin
 	phase	(MEMTOP-8)*1024
 	jmp	wdos		; Jump vector for compatibility
 
+; Default FCB to load shell
+fcb:	db	1,'CLI     COM'
+	dw	0,0,0,0,0,0,0,0,0,0,0,0
+	db	0
+; Copied to here to load CLI.COM
+fcbi:	db	0,'           '
+	dw	0,0,0,0,0,0,0,0,0,0,0,0
+	db	0
+
 	; Main function lookup table
 jtab:	dw	reload		;  0 00h Warm Boot - wdoswarm.asm
 	dw	conina		;  1 01h Console input - wdosterm.asm
@@ -190,7 +199,7 @@ jtab:	dw	reload		;  0 00h Warm Boot - wdoswarm.asm
 	dw	unsupp		; 29 1Dh Return bitmap of R/O drives
 	dw	unsupp		; 30 1Eh Set file attribs
 	dw	getdpb		; 31 1Fh Retrieve DPB
-	dw	unsupp		; 32 20h Get/set user number
+	dw	usern		; 32 20h Get/set user number
 	dw	rdrnd		; 33 21h Read Random - wdosfile.asm
 	dw	wrrnd		; 34 22h Write random - "
 	dw	fsize		; 35 23h File size - "
@@ -248,6 +257,7 @@ dirsec:	dw	0,0		; Current directory sector
 dmaadr:	dw	80h		; DMA address
 
 wdos:	sded	param		; Store parameter pointer
+
 	lxi	h, 0
 	shld	rval		; Default return value
 	sspd	pstack		; Keep user SP
@@ -287,12 +297,21 @@ osret:	popiy			; Restore IX/IY
 	
 unsupp:	
 	ifdef	DEBUG
-	call	prreg
+	push	b
 	mvi	c, '!'
-	call	list
-	halt
+	call	conout
+	pop	b
+	call	prreg
+;		halt
 	endif
-	xra	a
+	lxi	h, 00FFh	; Always error
+	shld	rval
+	ret
+
+	; Return the current user number (always 0)
+	; Ignores any attempt to set the user
+usern:	lxi	h, 0
+	shld	rval
 	ret
 	
 	
@@ -301,8 +320,12 @@ unsupp:
 doserr:	push	d		; Keep error message to print
 	call	crlf
 	lda	disk		; Current disk in use
-	adi	'A'		; Make it a character
-	sta	diskm		; Store to message
+	cpi	0FFh		; Invalid?
+	jrnz	.1
+	mvi	a, '?'		; Unknown disk???
+	jr	.2
+.1:	adi	'A'		; Make it a character
+.2:	sta	diskm		; Store to message
 	lxi	d, errm		; Print it
 	call	print
 	pop	d		; Restore error message
@@ -361,6 +384,62 @@ clrhl:	xra	a
 	;
 	;
 	ifdef	DEBUG
+	
+dmpdma:	push	h
+	push	d
+	push	b
+	push	psw
+
+	lhld	dmaadr
+	mvi	c, 8
+.l1:	mvi	b, 16
+.l:	mov	a, m
+	inx	h
+	push	b
+	call	phex
+	call	dbsp
+	pop	b
+	djnz	.l
+	push	b
+	call	dbcrlf
+	pop	b
+	dcr	c
+	jrnz	.l1
+	call	dbcrlf
+	
+	pop	psw
+	pop	b
+	pop	d
+	pop	h
+	ret
+	
+
+prfcb:	push	h
+	push	d
+	push	b
+	push	psw
+	
+	lhld	param
+	inx	h
+	mvi	b, 11
+.prl:	mov	c, m
+	inx	h
+	call	conout
+	djnz	.prl
+
+	lhld	dmaadr
+	mov	a, h
+	call	phex
+	mov	a, l
+	call	phex
+	call	dbsp
+	
+	pop	psw
+	pop	b
+	pop	d
+	pop	h
+	ret
+
 prreg:	push	h
 	push	d
 	push	b
@@ -374,8 +453,7 @@ prreg:	push	h
 	mov	a, b	; Print a space every other digit
 	ani	1
 	jz	.2
-	mvi	c, ' '
-	call	list
+	call	dbsp
 	lxi	d, 4
 	dad	d
 .2:	dcx	h
@@ -401,13 +479,17 @@ phex1:	ani	00Fh		; Mask off high nibble
 	aci	040h
 	daa
 	mov	c, a		; Print it
-	jmp	list
+	jmp	conout
 	
 	; Debug CRLF
 dbcrlf:	mvi	c, CR
-	call	list
+	call	conout
 	mvi	c, LF
-	jmp	list
+	jmp	conout
+
+dbsp:	mvi	c, ' '
+	jmp	conout
+		
 
 	endif
 
@@ -424,13 +506,6 @@ selm:	db 	'no drive$'
 filem:	db	'file '
 ronlym:	db	'read only$'
 fmtm:	db	'format$'
-
-fcb:	db	0,'CLI     COM'
-	dw	0,0,0,0,0,0,0,0,0,0,0,0
-fcbi:	db	0,'           '
-	dw	0,0
-	db	0,'           '
-	dw	0,0,0,0
 
 ; Stack to load shell
 	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0

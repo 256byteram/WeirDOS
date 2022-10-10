@@ -56,11 +56,13 @@ select: push	d		; Keep E
 	ora	h
 	mvi	a, 0FFh		; Return invalid
 	rz
-	mov	a, e		; Set new default disk
-	sta	CDISK
 	shld	dpbadr
-	jmp	login		; Log new disk in
-
+	mov	a, e
+	sta	disk		; Pointing at this disk internally
+	call	login		; Log new disk in
+	lda	disk
+	sta	CDISK
+	ret
 
 	
 	;
@@ -93,7 +95,6 @@ dpb:	dw	9*4		; Records per track
 dskrd:	sta	atype		; Keep access type
 	lxiy	dsect		; IY points at current sector data
 	ora	a
-	push	psw		; Keep state for flush
 	jrz	.1		; If data, keep pointing at DATA sector
 	lxiy	fsect		; Else load FAT sector
 .1:	lbcd	poffs		; Current partition offset to BC
@@ -114,16 +115,16 @@ dskrd:	sta	atype		; Keep access type
 	ldy	a, 3
 	cmp	d
 	jnz	.2
-	pop	psw		; Restore stack
 	xra	a
 	ret			; No change in sector to load
 	
-.2:	pop	psw		; Get back state for flush
-	push	d		; Flush if flagged as written
+.2:	push	d		; Flush if flagged as written
 	push	h
-	push	psw
-	cz	dflush		; Flush either data or FAT buffers
-	pop	psw
+	lda	atype
+	ora	a
+	cz	dflush		; Flush data or FAT buffers
+	lda	atype
+	ora	a
 	cnz	fflush
 	pop	h
 	pop	d
@@ -139,22 +140,16 @@ dskrd:	sta	atype		; Keep access type
 	cnz	doserr		; Return if error occured
 	lda	atype		; Store address depending on access type
 	ora	a
-	jnz	.3		; Store to either data or FAT address
-	shld	datadr
+	jz	.3		; Store to either data or FAT address
+	shld	fatadr
 	xra	a		; No error
 	ret	
-.3:	shld	fatadr
+.3:	shld	datadr
 	xra	a
 	ret
 
 	; Report errors when writing
-dskwr:	lbcd	poffs		; Current partition offset to BC
-	dad	b		; Add to HL
-	xchg
-	lbcd	poffs+2		; Add high word, carry to DE
-	dadc	b
-	xchg
-	call	write
+dskwr:	call	write
 	rz			; No error
 	lxi	d, ronlym
 	cpi	2		; Data error
@@ -232,11 +227,17 @@ dflush:	lda	stale		; Is the data bufer stale?
 	; Initialize partition information
 	;
 	;
-login:	lxi	h, 0		; Read first sector
+login:	lxi	h, -1		; Not pointing at any sector on new disk
+	shld	dsect
+	shld	dsect+2
+	shld	fsect
+	shld	fsect+2
+	lxi	h, 0		; Read first sector
 	lxi	d, 0
 	shld	poffs		; Clear partition offset
 	xra	a
 	call	dskrd
+	sta	rval
 	rnz			; Return with disk error
 	lhld	datadr
 	mov	a, m		; Get first byte of MBR
@@ -342,6 +343,8 @@ intdsk:	liyd	dpbadr
 	ora	h		; Also clears carry
 	jrnz	.isfat		; Jump if HL!=0 - volume valid
 	sta	curfat		; A=0, FAT is uninitialised
+	lxi	d, fmtm
+	call	doserr
 	mvi	a, 2		; Set A for invalid media error
 	ora	a		; Set Z flag
 	ret
@@ -378,8 +381,14 @@ selfcb:	ldx	a, FCBDSK	; Get disk to load from
 	lxi	h, disk		; Is selected the same as current disk?
 	cmp	m
 	rz			; Return if same
+	
+	push	h
+	push	psw
 	call	dflush		; Flush old buffers
 	call	fflush
+	pop	psw
+	pop	h
+	
 	mov	m, a		; Store new disk
 	mov	c, a
 	call	seldsk		; Select it
@@ -389,3 +398,6 @@ selfcb:	ldx	a, FCBDSK	; Get disk to load from
 	cz	doserr		; If so, no device
 	shld	dpbadr		; Store DPB address
 	jmp	login
+	
+	
+	

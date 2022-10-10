@@ -32,6 +32,7 @@ print	equ	9		; Print $ terminated
 binput	equ	10		; Buffered console input
 cstat	equ	11		; Console status
 dreset	equ	13		; Disk reset
+seldsk	equ	14		; Select disk
 openf	equ	15		; Open file
 closef	equ	16		; Close file
 search	equ	17		; Search for first file
@@ -54,7 +55,21 @@ eof	equ	26		; EOF character marker
 	
 	org	tpa
 	
-entry:	jmp	init
+entry:	jmp	cli
+
+
+nf:	db	10,"No file",0
+btvec:	dw	0		; Boot vector
+
+curfcb:	db	0		; Current FCB pointed at by state machine (bootstrap, FCB1, FCB2)
+btfcb:	dw	0		; Boot FCB
+xfcb1:	dw	fcb1		; FCB 1
+xfcb2:	dw	fcb2		; FCB 2
+
+blank:	db	0,"           ",0,0,0,0
+	db	0,"           ",0,0,0,0
+	db	0,0,0,0
+pdir:	db	"        .    : ",0
 
 	;
 	; This chunk of code is copied below WDOS
@@ -70,7 +85,7 @@ boot:	lxi	h, tpa
 	call	wdos
 	
 	lhld	wdos+1
-	lxi	d, -35		; Move back to start of FCB
+	lxi	d, -(bootx-bootfcb)	; Move back to start of FCB
 	dad	d
 	xchg			; DE contains transient FCB
 	mvi	c, readn
@@ -88,6 +103,14 @@ boot:	lxi	h, tpa
 .2:	pop	h		; Remove DMA from stack
 	cpi	1		; EOF?
 	jnz	0		; error
+	
+	lhld	wdos+1		; Close the file
+	lxi	d, -(bootx-bootfcb)
+	dad	d
+	xchg
+	mvi	c, closef
+	call	wdos
+	
 	mvi	e, lf		; New line after program loaded
 	mvi	c, cout
 	call	wdos
@@ -101,15 +124,10 @@ boot:	lxi	h, tpa
 	jmp	tpa
 	
 	; Load transient programs with this FCB
-	db	0,"           ",0,0,0
+bootfcb	db	0,"        COM",0,0,0
 	dw	0,0,0,0,0,0,0,0,0,0
-	
+	db	0
 bootx	equ	$
-
-btvec:	dw	0		; Boot vector
-blank:	db	0,"           ",0,0,0,0
-	db	0,"           ",0,0,0,0
-	
 
 crlf:	mvi	e, cr
 	mvi	c, cout
@@ -123,19 +141,27 @@ crlf:	mvi	e, cr
 	; Initialise environment
 	;
 	;
-init:	lhld	wdos+1		; Get top of TPA
+cli:	lhld	wdos+1		; Get top of TPA
 	lxi	b, bootx-boot	; Size of boot loader
+	ora	a		; Clear carry
 	dsbc	b		; Address to copy bootloader to
 	shld	btvec		; Keep to jump to
 	sphl			; Also initialize the stack
 	xchg			; Destination from HL to DE
 	lxi	h, boot		; Source of boot loader
 	ldir			; Copy it
+	xchg
+	lxi	b, -(bootx-bootfcb)		; Move back to start of transient FCB
+	dad	b
+	shld	btfcb		; Keep this location
 	
+	lxi	d, dirsp	; Loading data to here
+	mvi	c, setdma
+	call	wdos
 	
-cli:	lxi	h, blank	; Blank FCB
-	lxi	d, fcb1		; Default FCB
-	lxi	b, 32		; copy it
+	lxi	h, blank	; Blank FCB
+	lded	xfcb1		; Default FCB
+	lxi	b, 36		; copy it
 	ldir	
 	call	crlf
 	lda	cdisk		; Print current disk for prompt
@@ -148,16 +174,12 @@ cli:	lxi	h, blank	; Blank FCB
 	mvi	c, cout
 	call	wdos
 	
-	lxi	h, defdma	; Clear default buffer
+	lxi	h, cmdbuf	; Clear default buffer
 	mvi	m, cmdlen	; Length of command line
 	inx	h
 	mvi	m, 0
 	
-	lxi	d, defdma	; Set default buffer address
-	mvi	c, setdma
-	call	wdos
-	
-	lxi	d, 0		; Read command into default buffer
+	lxi	d, cmdbuf	; Read command into default buffer
 	mvi	c, binput
 	call	wdos
 	
@@ -165,58 +187,138 @@ cli:	lxi	h, blank	; Blank FCB
 	; Interpret command. String length in B, which
 	; is decremented as the string pointer is incremented.
 	;
-	lxi	h, defdma+1
+	lxi	h, cmdbuf+1
 	mov	b, m
 	inx	h
 	call	upper		; Uppercase that string
 	jz	cli		; No input
 	
-	lhld	wdos+1
-	lxi	d, -35		; Move back to start of FCB
-	dad	d
-	xchg
-	lxi	h, defdma+1
+	lxi	h, cmdbuf+1
 	mov	b, m
+	inx	h		; HL = user string, DE = FCB
+	xchg
+	
+	;
+	; String state machine
+	;
+	; A = current character
+	; B = characters remaining in user input
+	; C = character within FCB (MSB indicates whitespace was found)
+	; DE = string pointer
+	; HL = Current FCB pointer
+	;
+	lhld	btfcb
+	inx	h		; Point at first character of FCB
+	xra	a		; Reset memory parameters
+	sta	curfcb
+	mvi	c, 0	
+smwhit:	bit	7, c		; Already on whitespace?
+	jnz	sm		; Yes, continue
+	mov	a, c		; Still processing transient FCB?
+	ora	a		; (MSB already checked)
+	jz	sm		; Yes, continue
+	
+	mvi	c, 080h		; Flag for whitespace, reset SM
+	lda	curfcb		; FCB 1 or 2?
+	cpi	3		; Only have boot FCB, FCB1, FCB2 to choose from
+	jnc	smend		; Terminate if higer than that
+	
+	lhld	xfcb1		; Load FCB1, check to see if we're on it
+	inx	h		; Point at first character
+	inr	a
+	sta	curfcb
+	cpi	1
+	jz	sm		; We're up to FCB2
+	lhld	xfcb2
+	inx	h		; Point at first character
+	
+sm:	xra	a
+	ora	b		; Last character?
+	jrnz	smcont
+	
+	; Determine action on end of line here
+smend:	lda	curfcb
+	ora	a		; on boot FCB?
+	jnz	cmdex		; No, execute command	
+	xra	a		; C == 0?
+	cmp	c
+	jz	setdef		; Change default drive
+	jmp	cmdex		; Execute command
+
+smcont:	ldax	d		; Get current character
+	inx	d
+	dcr	b		; Count character
+	cpi	'!'		; White space (space and control characters)
+	jrc	smwhit
+
+	res	7, c		; No longer on whitespace
+	cpi	'*'		; Wildcard
+	jrz	wildc
+	cpi	'.'		; File extension
+	jrz	dot
+	cpi	':'		; Drive change
+	jrz	drive
+	mov	m, a
+	inc	c
 	inx	h
-	xchg			; DE = user string, HL = FCB
-	call	skipwh		; Skip whitespace
-	jz	cli		; No input
-	call	tofcb
-	call	skipwh
-	lxi	h, fcb1		; Parameter 1
-	call	tofcb
-	call	skipwh
-	lxi	h, fcb2
-	call	tofcb
-	lhld	wdos+1
-	lxi	d, -34		; Point at filename in FCB
-	dad	d
-	xchg			; String at DE
-	call	intern
-	jnz	trans
-	lxi	d, cli
-	push	d
-	pchl
+	jr	sm
+
+wildc:	mvi	a, 8		; Currently on 8th character?
+	cmp	c
+	jrz	sm
+	mvi	a, 12		; Alternatively, at end of filename?
+	cmp	c
+	jrz	sm
+	mvi	m, '?'		; Question mark to FCB
+	inx	h
+	inc	c
+	jr	wildc
+
+dot:	mvi	a, 9
+dotl:	inc	c
+	cmp	c
+	jrnc	sm
+	inx	h
+	jr	dotl
+	
+drive:	mvi	a, 1		; Must be second character (0 based)
+	cmp	c
+	jrnz	sm		; Is not second character, ignore
+	dcx	h		; Get last character from FCB
+	mov	a, m
+	sui	'@'		; Drive from 1 to 16
+	dcx	h		; Point at drive specifier
+	mov	m, a
+	inx	h		; Point at first character
+	mvi	c, 0		; Also point to first character here
+	jr	sm
+	
+	;
+	; Set the default drive
+	;
+setdef:	dcx	h
+	mov	a, m
+	dec	a		; 0..15 from 1..16
+	mov	e, a
+	mvi	c, seldsk	; Change default disk
+	call	wdos
+	jmp	cli
+
+	
+	; Attempt to execute command
+cmdex:	call	intern
+	jrz	cmdex1		; Found internal command	
 	;
 	; Attempt to load a transient program
 	;
-trans:	lhld	wdos+1		; Get FCB at top of memory
-	lxi	d, -26		; Count backwards from end of memory
-	dad	d
-	mvi	m, 'C'		; Search for .COM
-	inx	h
-	mvi	m, 'O'
-	inx	h
-	mvi	m, 'M'
-	lxi	d, -11
-	dad	d
-	xchg
+	lded	btfcb		; FCB at top of memory
 	mvi	c, openf
 	call	wdos
 	ora	a
 	jnz	nofile		; Error
+	
 	lhld	btvec		; Get boot vector
-	pchl			; Jump to it
+cmdex1:	pchl			; Jump to it
 	
 
 
@@ -238,89 +340,41 @@ upper:	mov	a, b
 	djnz	.1
 	ori	0FFh		; Non-zero for valid input
 	ret
-	
 
 	;
-	; Read string to a FCB filename
+	; Copy the command tail to the DMA area (80h)
+	; Don't clobber registers
 	;
-	; HL points at FCB to fill to. DE to string to read from
-	;
-tofcb:	inx	h
-	call	clrfil
-	mvi	c, 8		; 8 characters for first part
-.1:	mov	a, b		; Count string length
-	ora	a
-	rz
-	dcr	b
-	ldax	d
-	inx	d
-	cpi	' '		; End of parameter?
-	rz
-	cpi	'.'		; Dot moves to next section
-	jrz	.3
-	cpi	'*'
-	jrz	.2
-	mov	m, a
-	inx	h
-	dcr	c
-	jrz	.3		; End of first 8 characters?
-	jr	.1
-	
-	; Fill rest of FCB with question marks
-.2:	mov	a, c
-	ora	a
-	jz	.1		; 8 character count ended?
-	mvi	m, '?'
-	inx	h
-	dcr	c
-	jr	.2
-
-	; Move FCB pointer across to file extension
-.3:	push	b		; Add C to HL, saving B
-	mvi	b, 0
-	dad	b
-	pop	b
-	mvi	c, 3		; Will need to count 3 characters
-	jr	.1
-
-	
-	;
-	; Clear filename at HL to spaces. Saves BC, HL
-	;
-clrfil:	push	h
+gettail:
 	push	b
-	mvi	b, 11
-.1:	mvi	m, ' '
-	inx	h
-	djnz	.1
-	pop	b
-	pop	h
-	ret
+	push	d
+	push	h
 
-	
-	;
-	; Read in from DE++ until character is not whitespace
-	;
-	; Returns with Z set if the end of the string is found
-	; DE points at next valid character
-	; 
-skipw1:	inx	d
-	dcr	b
-	; Enter here
-skipwh:	mov	a, b		; Make sure there's a string there
+	lxi	h, defdma	; Store length
+	mov	m, b
+	inx	h
+	mov	a, b
 	ora	a
-	rz	
-	ldax	d
-	cpi	' '
-	rnz
-	jr	skipw1
+	jrz	.1		; Nothing to copy
+	
+	mov	c, b	; Set length
+	mvi	b, 0
+	xchg		; For LDIR
+	ldir		; Copy it
+	
+.1:	pop	h
+	pop	d
+	pop	b
+	ret
 	
 	;
-	; Search for an internal command, compared to user string at DE
+	; Search for an internal command, compared to string at boot FCB
 	; If found, return with its vector in HL, Z
 	; If not found, return with NZ
 	;
-intern:	lxi	h, intcmd	; Get total number of commands
+intern:	lded	btfcb		; Boot FCB
+	inx	d
+	lxi	h, intcmd	; Get total number of commands
 	mov	c, m
 	inx	h		; Point at first command
 .1:	push	d		; Keep user pointer for loop
@@ -367,7 +421,7 @@ strcmp:	ldax	d
 	xra	a		; String found
 	ret
 	
-.2:	mvi	a, '$'		; End of string at HL?
+.2:	xra	a		; End of string at HL?
 	cmp	m
 	inx	h
 	jrnz	.4		; No, skip to next string and return
@@ -387,8 +441,8 @@ strcmp:	ldax	d
 	;
 intcmd:	db	2
 
-	db	"DIR$"
-	db	"TYPE$"
+	db	"DIR",0
+	db	"TYPE",0
 
 
 intvec:	dw	dir
@@ -400,12 +454,12 @@ intvec:	dw	dir
 	; If FCB is uninitialized (spaces) it is filled with '?'
 	;
 	;
-dir:	lxi	h, fcb1+1
+dir:	lhld	xfcb1
+	inx	h
 	mov	a, m
 	cpi	' '
 	jrnz	.3
 	; The FCB has no file specified
-	lxi	h, fcb1+1
 	mvi	b, 11
 .4:	mvi	m, '?'
 	inx	h
@@ -413,57 +467,66 @@ dir:	lxi	h, fcb1+1
 	
 .3:	mvi	c, dreset	; Reset disks in case of disk change
 	call	wdos
-	lxi	d, fcb1		; Initial search
+	lded	xfcb1		; Initial search
 	mvi	c, search
 	call	wdos
 	ora	a
 	jnz	nofile		; Print message on no-file
-	mvi	b, 1
-	push	b
-.loop:	pop	b
-	djnz	.2
+	mvi	b, 6		; Initialise
+.loop:	djnz	.2
 	push	psw
 	call	crlf
 	pop	psw
-	mvi	b, 5
+	mvi	b, 5		; 5 entries per line
 .2:	cpi	0FFh		; Return at end of directory
 	rz
+	
+	push	b		; Keep file count
+	lda	dirsp+10	; Address of hidden file attribute
+	add	a
+	jrnc	.pdir		; Print file if not hidden
+	
+	pop	b		; Cancel out decrement at start of loop
+	inr	b
 	push	b
-	lxi	h, defdma+12
-	mvi	m, ' '
-	inx	h
-	mvi	m, ':'
-	inx	h
-	mvi	m, ' '
-	inx	h
-	mvi	m, '$'		; Make directory entry printable
-	lxi	d, defdma+1
-	mvi	c, print
-	call	wdos
-	lxi	d, fcb1
+	jr	.ndir		; Do not print directory entry
+		
+.pdir:	lxi	d, pdir		; Copy filename to print buffer
+	lxi	h, dirsp+1
+	lxi	b, 8
+	ldir
+	inx	d		; Copy extension to print buffer after dot
+	lxi	b, 3
+	ldir
+	
+	lxi	d, pdir
+	call	printz
+	
+.ndir	lxi	d, fcb1
 	mvi	c, next
 	call	wdos
+	pop	b
 	jr	.loop		; Loop
 
 	
 	;
 	; Type the file in FCB to the console
 	;
-type:	lxi	d, defdma	; Load to default DMA
+type:	lxi	d, dirsp	; Load to default DMA
 	mvi	c, setdma
 	call	wdos
-	lxi	d, fcb1		; Open it
+	lded	xfcb1		; Open it
 	mvi	c, openf
 	call	wdos
 	ora	a
 	jnz	nofile		; Message if file not found
 	
-.loop:	lxi	d, fcb1
+.loop:	lded	xfcb1
 	mvi	c, readn
 	call	wdos
 	ora	a
 	rnz
-	lxi	h, defdma
+	lxi	h, dirsp
 	mvi	b, 128		; 128 characters to print
 .pr:	mov	a, m
 	cpi	eof
@@ -481,9 +544,24 @@ type:	lxi	d, defdma	; Load to default DMA
 	jr	.loop		; Continue printing blocks
 	
 nofile:	lxi	d, nf
-	mvi	c, print
-	call	5
-	ret
+	;jmp	printz
+	;ret
 	
 	
-nf:	db	10,"No file$"
+	;
+	; Print a null terminated string
+	;
+printz:	ldax	d
+	inx	d
+	ora	a
+	rz
+	push	d
+	mov	e, a
+	mvi	c, cout
+	call	wdos
+	pop	d
+	jr	printz
+
+cmdbuf:	defs	80		; Command line buffer
+dirsp:	defs	128		; Directory search space (DMA)
+

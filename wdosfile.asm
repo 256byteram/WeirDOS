@@ -31,7 +31,17 @@
 	;
 	; Open file
 	;
-fopen:	call	search
+fopen:	
+	;ifdef	DEBUG
+	;push	b
+	;mvi	c, 'O'
+	;call	conout
+	;call	prfcb
+	;call	prreg
+	;pop	b
+	;endif
+	
+	call	search
 	rnz
 	lded	param		; User FCB as destination
 	lhld	dmaadr
@@ -118,6 +128,7 @@ clearl:	mov	m, a
 	; Search for first directory entry in FCB
 	;
 search:	call	selfcb		; Select drive from FCB
+	rnz
 	lxi	h, 0
 	shld	diridx
 	lhld	rtsect		; Get current root sector
@@ -255,7 +266,12 @@ wrrnd:	call	calcr
 	;
 	; Write next record
 	;
-writen:	call	filrec		; Fill buffer with current record
+writen:	
+	ifdef	DEBUG
+	call	dmpdma
+	endif
+
+	call	filrec		; Fill buffer with current record
 	jrz	.1		; Jump if not EOF or error
 	cpi	1
 	sta	rval		; Keep error
@@ -297,9 +313,10 @@ create:	call	search		; Overwrite existing file or make new file
 	call	clrde		; Clear rest of directory entry
 	mvi	b, 21		; Initialise user FCB
 	call	clrhl
-	lda	stale
-	ora	1		; Data is stale
-	sta	stale
+	lxi	h, stale
+	mov	a, m
+	ora	1
+	mov	m, a
 	call	dflush
 	xra	a		; No error
 	sta	rval		; search also sets rval
@@ -322,7 +339,7 @@ rename:	call	search		; Find file to rename
 	dad	b
 	mvi	b, 11		; Copy 11 bytes
 	ldir
-	lhld	stale
+	lxi	h, stale
 	mov	a, m
 	ora	1
 	mov	m, a
@@ -439,8 +456,26 @@ cnvcpm:	lded	curdir
 	xra	a		; User number is always 0
 	stax	d
 	inx	d		; DE offs 1
-	lxi	b, 11		; Copy 11 characters for filename
+	lxi	b, 11		; Copy 8 characters for filename
 	ldir			; DE offs 12
+	
+	dcx	d		; Rewind to look at file extension
+	dcx	d
+	dcx	d
+	
+	mov	c, m            ; Get attributes
+	mvi	b, 3		; 3 attributes
+	xchg			; To load destination byte through HL
+.attrs:	xra	a		; Clear A and Carry
+	rarr	c		; Move LSB of attributes to carry
+	rra			; Move to MSB of A
+	ora	m		; Combine with character in directory
+	mov	m, a		; Return to entry
+	inx	h		; next
+	djnz	.attrs
+	
+	xchg
+	
 	mvi	b, 4		; Clear extent data
 	call	clrde		; DE offs 16
 	lda	diridx+1	; High byte of current directory entry
@@ -459,9 +494,9 @@ cnvcpm:	lded	curdir
 	dad	b
 	lxi	b, 8		; Copy 8 bytes (date, clust, size)
 	ldir
-	mvi	b, 128-32	; Fill remainder of buffer
-	mvi	a, 0E5h
-	call	fill
+	;mvi	b, 128-32	; Fill remainder of buffer
+	;mvi	a, 0E5h
+	;call	fill
 	pushix
 	lixd	dmaadr		; Point IX at DMA address to
 	call	updext		; update extent data and return
