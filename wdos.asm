@@ -232,7 +232,7 @@ fatsec:	dw	0		; First sector of FAT region
 rtsect:	dw	0		; First sector of root directory region
 datsec:	dw	0		; First sector of data region
 poffs:	dw	0,0		; Partition offset (0 for unpartitioned)
-volsiz:	dw	0		; Total volume size if <65536, else 0
+volsiz:	dw	0,0		; Total volume size
 ctotal:	dw	0		; Total number of clusters in volume
 ; Data for current location in FAT chain
 recrd:	dw	0		; Current record (internal use)

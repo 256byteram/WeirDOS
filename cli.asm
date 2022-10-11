@@ -54,8 +54,7 @@ lf	equ	10
 eof	equ	26		; EOF character marker
 	
 	org	tpa
-	
-entry:	jmp	cli
+entry:	jmp	init
 
 
 nf:	db	10,"No file",0
@@ -132,7 +131,7 @@ bootx	equ	$
 crlf:	mvi	e, cr
 	mvi	c, cout
 	call	wdos
-	mvi	e, lf
+lfonly:	mvi	e, lf
 	mvi	c, cout
 	jmp	wdos
 	
@@ -141,7 +140,7 @@ crlf:	mvi	e, cr
 	; Initialise environment
 	;
 	;
-cli:	lhld	wdos+1		; Get top of TPA
+init:	lhld	wdos+1		; Get top of TPA
 	lxi	b, bootx-boot	; Size of boot loader
 	ora	a		; Clear carry
 	dsbc	b		; Address to copy bootloader to
@@ -155,7 +154,7 @@ cli:	lhld	wdos+1		; Get top of TPA
 	dad	b
 	shld	btfcb		; Keep this location
 	
-	lxi	d, dirsp	; Loading data to here
+cli:	lxi	d, dirsp	; Loading data to here
 	mvi	c, setdma
 	call	wdos
 	
@@ -223,6 +222,9 @@ smwhit:	bit	7, c		; Already on whitespace?
 	cpi	3		; Only have boot FCB, FCB1, FCB2 to choose from
 	jnc	smend		; Terminate if higer than that
 	
+	ora	a
+	cz	gettail		; Past end of first command, copy tail to DMA area
+	
 	lhld	xfcb1		; Load FCB1, check to see if we're on it
 	inx	h		; Point at first character
 	inr	a
@@ -274,10 +276,10 @@ wildc:	mvi	a, 8		; Currently on 8th character?
 	inc	c
 	jr	wildc
 
-dot:	mvi	a, 9
+dot:	mvi	a, 8
 dotl:	inc	c
 	cmp	c
-	jrnc	sm
+	jrc	sm
 	inx	h
 	jr	dotl
 	
@@ -346,6 +348,7 @@ upper:	mov	a, b
 	; Don't clobber registers
 	;
 gettail:
+	push	psw
 	push	b
 	push	d
 	push	h
@@ -365,6 +368,7 @@ gettail:
 .1:	pop	h
 	pop	d
 	pop	b
+	pop	psw
 	ret
 	
 	;
@@ -454,7 +458,8 @@ intvec:	dw	dir
 	; If FCB is uninitialized (spaces) it is filled with '?'
 	;
 	;
-dir:	lhld	xfcb1
+dir:	call	lfonly
+	lhld	xfcb1
 	inx	h
 	mov	a, m
 	cpi	' '
@@ -465,8 +470,8 @@ dir:	lhld	xfcb1
 	inx	h
 	djnz	.4
 	
-.3:	mvi	c, dreset	; Reset disks in case of disk change
-	call	wdos
+.3:	;mvi	c, dreset	; Reset disks in case of disk change
+	;call	wdos
 	lded	xfcb1		; Initial search
 	mvi	c, search
 	call	wdos
@@ -512,7 +517,8 @@ dir:	lhld	xfcb1
 	;
 	; Type the file in FCB to the console
 	;
-type:	lxi	d, dirsp	; Load to default DMA
+type:	call	lfonly
+	lxi	d, dirsp	; Load to default DMA
 	mvi	c, setdma
 	call	wdos
 	lded	xfcb1		; Open it

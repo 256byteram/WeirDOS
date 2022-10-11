@@ -324,23 +324,39 @@ intdsk:	liyd	dpbadr
 	shld	datsec		; Data region first sector	
 	; Initialize volsec for FAT12/16 determination
 	; FAT12 is true if (volsiz-datsec)>>ashf < 4085
+	lxi	d, 0		; high word 0 by default
 	ldy	l, TOTSEC16
 	ldy	h, TOTSEC16+1
-	shld	volsiz
+	mov	a, l		; Is the field populated?
+	ora	h
+	jrnz	.small
+	ldy	l, TOTSEC32
+	ldy	h, TOTSEC32+1
+	ldy	e, TOTSEC32+2
+	ldy	d, TOTSEC32+3
+	
+.small:	shld	volsiz
+	sded	volsiz+2
 	push	h		; Keep for FAT type calculation
+	push	d
 	; Determine how many clusters there are on the disk
 	ldy	a, SECPERCLUST	; Get sectors per cluster
 	rar			; Start by shifting. Detects 1 SPC
 .5:	jrc	.6		; 
+	rarr	d
+	rarr	e
 	rarr	h
 	rarr	l
 	ora	a
 	rar
 	jr	.5
 .6:	shld	ctotal		; Save total clusters
+	pop	d
 	pop	h	
-	mov	a, l		; HL = 0?
-	ora	h		; Also clears carry
+	mov	a, e		; DEHL = 0?
+	ora	d		; Also clears carry
+	ora	l
+	ora	h
 	jrnz	.isfat		; Jump if HL!=0 - volume valid
 	sta	curfat		; A=0, FAT is uninitialised
 	lxi	d, fmtm
@@ -348,17 +364,24 @@ intdsk:	liyd	dpbadr
 	mvi	a, 2		; Set A for invalid media error
 	ora	a		; Set Z flag
 	ret
-.isfat:	lded	datsec
-	dsbc	d		; Subtract datsec from volsize
+.isfat:	lbcd	datsec
+	dsbc	b		; Subtract datsec from volsize
+	lxi	b, 0
+	xchg
+	dsbc	b
+	xchg
+	
 	lda	ashf		; Divide it by ashf
 	mov	b, a
 .7:	ora	a
+	rarr	d
+	rarr	e
 	rarr	h
 	rarr	l
 	djnz	.7
-	lxi	d, 4085		; Maximum number of clusters in FAT12 volume
+	lxi	b, 4085		; Maximum number of clusters in FAT12 volume
 	xra	a
-	dsbc	d		; Subtract (compare)
+	dsbc	b		; Subtract (compare)
 	cmc			; 0=FAT12, 1=FAT16
 	ral			; Shift carry into cleared accumulator
 	inr	a		; 1=FAT12, 2=FAT16

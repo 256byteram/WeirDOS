@@ -29,7 +29,7 @@
 	maclib	Z80
 
 MEMTOP	equ	64	; Top of addressable memory (up to 64k)
-TOTAL	equ	2	; Total number of drives in system
+TOTAL	equ	3	; Total number of drives in system
 
 FALSE	equ	0
 TRUE	equ	NOT FALSE
@@ -155,13 +155,12 @@ wboote	jmp	wboot		; warm start
 	jmp	write		; write disk
 	jmp	listst		; return list status
 
-driver	dw	adrv, bdrv		; Points to available drivers
+driver	dw	bdrv, bdrv, bdrv		; Points to available drivers
 
 ;adrv	dw	fsel, fseek, fread, fwrite	; Routine table for floppy drive
-adrv	dw	hsel, hseek, hread, hwrite	; Routine table for hard drive
 bdrv	dw	hsel, hseek, hread, hwrite	; Routine table for hard drive
 
-current	dw	adrv			; Current drive table in use
+current	dw	bdrv			; Current drive table in use
 
 boot	lxi	sp, bstack
 	xra	a
