@@ -68,26 +68,26 @@ CDISK	equ	4	; Active disk
 DOSVEC	equ	5	; DOS vector
 
 ; Structure offset equates for DPB
-DPBSIZ		equ	49	; Total size of structure
-DPBOFF		equ	11	; Absolute offset from start of sector
-BYTESPERSEC	equ	0	; (2) Bytes per sector
-SECPERCLUST	equ	2	; (1) Sectors per cluster
-RESERVEDSEC	equ	3	; (2) Reserved sectors
-NUMFATS		equ	5	; (1) Number of FATs
-ROOTENTCNT	equ	6	; (2) Root Directory Entries
-TOTSEC16	equ	8	; (2) Total sectors 16-bit value
-MEDIATYPE	equ	10	; (1) Media type (0xF8 fixed, 0xF0 removable)
-FATSIZE		equ	11	; (2) Sectors taken by one FAT
-SECPERTRK	equ	13	; (2) Sectors per track
-NUMHEADS	equ	15	; (2) Number of heads
-HIDDSEC		equ	17	; (4) Hidden sectors before partition
-TOTSEC32	equ	21	; (4) Total sectors 32-bit value
-DRVNUM		equ	25	; (1) Drive number, 80h or 0
+DPB$SIZ		equ	51	; Total size of structure
+DPB$OFF		equ	11	; Absolute offset from start of sector
+DPB$BYTESPERSEC	equ	0	; (2) Bytes per sector
+DPB$SECPERCLUST	equ	2	; (1) Sectors per cluster
+DPB$RESERVEDSEC	equ	3	; (2) Reserved sectors
+DPB$NUMFATS	equ	5	; (1) Number of FATs
+DPB$ROOTENTCNT	equ	6	; (2) Root Directory Entries
+DPB$TOTSEC16	equ	8	; (2) Total sectors 16-bit value
+DPB$MEDIATYPE	equ	10	; (1) Media type (0xF8 fixed, 0xF0 removable)
+DPB$FATSIZE	equ	11	; (2) Sectors taken by one FAT
+DPB$SECPERTRK	equ	13	; (2) Sectors per track
+DPB$NUMHEADS	equ	15	; (2) Number of heads
+DPB$HIDDSEC	equ	17	; (4) Hidden sectors before partition
+DPB$TOTSEC32	equ	21	; (4) Total sectors 32-bit value
+DPB$DRVNUM	equ	25	; (1) Drive number, 80h or 0
 ;RESERVED		26
-BOOTSIG		equ	27	; (1) Boot sig is 29h
-VOLID		equ	28	; (4) Volume serial number
-VOLLABEL	equ	32	; (11) Volume label (11 characters)
-FILESYSTYPE	equ	43	; (8) File system type 'FAT12   ' etc
+DPB$BOOTSIG	equ	27	; (1) Boot sig is 29h
+DPB$VOLID	equ	28	; (4) Volume serial number
+DPB$VOLLABEL	equ	32	; (11) Volume label (11 characters)
+DPB$FILESYSTYPE	equ	43	; (8) File system type 'FAT12   ' etc
 
 ; Structure for FCB
 ;

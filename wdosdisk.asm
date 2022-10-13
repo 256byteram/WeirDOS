@@ -68,22 +68,12 @@ select: push	d		; Keep E
 	;
 	; Function 1Fh (31)
 	;
-	; Return address of (fake) DPB
+	; Return address of DOS DPB
 	;
-getdpb:	lxi	h, dpb
+getdpb:	lhld	dpbadr
 	shld	rval
 	ret
-	
-dpb:	dw	9*4		; Records per track
-	db	3		; Block shift
-	db	7		; Block mask
-	db	0		; Extent mask
-	dw	1440*4-1	; Blocks on disk -1
-	dw	111		; Root directory entries
-	db	0FFh, 0FFh	; Directory allocation map
-	dw	0		; Checksum
-	dw	0		; Reserved tracks
-	
+
 	
 
 	; Disk read. Flushes currently loaded sectors if needed,
@@ -172,14 +162,14 @@ fflush:	lda	stale		; Is the FAT buffer marked as stale?
 	ani	2
 	rz			; Return if not
 	liyd	dpbadr		; Need to get some data from the DPB
-	ldy	b, NUMFATS	; Get number of FATs to loop
+	ldy	b, DPB$NUMFATS	; Get number of FATs to loop
 	lhld	fsect		; First sector to DEHL
 	lded	fsect+2
 	jr	.2
 	
 .1:	push	b
-	ldy	c, FATSIZE	; Add FATSIZE to current sector
-	ldy	b, FATSIZE+1
+	ldy	c, DPB$FATSIZE	; Add FATSIZE to current sector
+	ldy	b, DPB$FATSIZE+1
 	dad	b
 	lxi	b, 0
 	xchg
@@ -243,10 +233,10 @@ login:	lxi	h, -1		; Not pointing at any sector on new disk
 	mov	a, m		; Get first byte of MBR
 	cpi	0EBh		; Should be this if valid
 	jrnz	.1		; Else check for partitions
-	lxi	d, DPBOFF	; Point HL to begining of DPB
+	lxi	d, DPB$OFF	; Point HL to begining of DPB
 	dad	d
 	lded	dpbadr		; Get DPB location
-	lxi	b, DPBSIZ	; Total size
+	lxi	b, DPB$SIZ	; Total size
 	ldir
 	jr	intdsk		; Return through intdsk
 
@@ -275,14 +265,14 @@ login:	lxi	h, -1		; Not pointing at any sector on new disk
 	; - FAT12 or FAT16
 	;
 intdsk:	liyd	dpbadr
-	ldy	a, BYTESPERSEC+1	; bytes-per-sector/256 in A
+	ldy	a, DPB$BYTESPERSEC+1	; bytes-per-sector/256 in A
 	mvi	b, 0
 .1:	rar
 	inr	b		; Count number of shifts in B
 	jnc	.1
 	lxi	h, bshf		; Block shift factor
 	mov	m, b
-	ldy	a, SECPERCLUST	; Get sectors per cluster
+	ldy	a, DPB$SECPERCLUST	; Get sectors per cluster
 	mvi	b, -1		; Count starting at -1, always increments to 0
 .2:	rar
 	inr	b
@@ -290,14 +280,14 @@ intdsk:	liyd	dpbadr
 	lxi	h, ashf		; Allocation shift factor
 	mov	m, b
 	; Initialize fatsec
-	ldy	l, RESERVEDSEC
-	ldy	h, RESERVEDSEC+1
+	ldy	l, DPB$RESERVEDSEC
+	ldy	h, DPB$RESERVEDSEC+1
 	shld	fatsec
 	push	h		; Keep while calculating FAT size
 	; Initialize rtsect
-	ldy	e, FATSIZE
-	ldy	d, FATSIZE+1
-	ldy	b, NUMFATS	; Multiply FATSIZE by NUMFATS
+	ldy	e, DPB$FATSIZE
+	ldy	d, DPB$FATSIZE+1
+	ldy	b, DPB$NUMFATS	; Multiply FATSIZE by NUMFATS
 	lxi	h, 0		; Result in HL
 .3:	dad	d
 	djnz	.3
@@ -311,8 +301,8 @@ intdsk:	liyd	dpbadr
 	lda	bshf
 	adi	2
 	mov	b, a
-	ldy	l, ROOTENTCNT	; Total root entries
-	ldy	h, ROOTENTCNT+1
+	ldy	l, DPB$ROOTENTCNT	; Total root entries
+	ldy	h, DPB$ROOTENTCNT+1
 	shld	dirmax		; Keep it for directory search
 .4:	ora	a		; Clear carry
 	rarr	h
@@ -325,22 +315,22 @@ intdsk:	liyd	dpbadr
 	; Initialize volsec for FAT12/16 determination
 	; FAT12 is true if (volsiz-datsec)>>ashf < 4085
 	lxi	d, 0		; high word 0 by default
-	ldy	l, TOTSEC16
-	ldy	h, TOTSEC16+1
+	ldy	l, DPB$TOTSEC16
+	ldy	h, DPB$TOTSEC16+1
 	mov	a, l		; Is the field populated?
 	ora	h
 	jrnz	.small
-	ldy	l, TOTSEC32
-	ldy	h, TOTSEC32+1
-	ldy	e, TOTSEC32+2
-	ldy	d, TOTSEC32+3
+	ldy	l, DPB$TOTSEC32
+	ldy	h, DPB$TOTSEC32+1
+	ldy	e, DPB$TOTSEC32+2
+	ldy	d, DPB$TOTSEC32+3
 	
 .small:	shld	volsiz
 	sded	volsiz+2
 	push	h		; Keep for FAT type calculation
 	push	d
 	; Determine how many clusters there are on the disk
-	ldy	a, SECPERCLUST	; Get sectors per cluster
+	ldy	a, DPB$SECPERCLUST	; Get sectors per cluster
 	rar			; Start by shifting. Detects 1 SPC
 .5:	jrc	.6		; 
 	rarr	d

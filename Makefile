@@ -37,11 +37,10 @@ DISKIMG=wdos.img
 # Dependencies for WDOS source file
 DEPS+=Z80.lib wdosterm.asm wdoswarm.asm
 DEPS+=wdosfile.asm wdosdisk.asm wdosfat.asm
-DEPS+=NOTICE.TXT
 # Target system binary image
 SYS=WDOS.SYS
 # CLI binary
-CLI=CLI.COM
+CLI=cli.cim
 # CLI dependencies
 CLIDEPS=cli.asm
 # WDOS system memory image
@@ -52,6 +51,8 @@ BCOPY=bcopy.cim
 BIOS=bios.cim
 # Floppy disk image boot sector
 BSECT=bsect.cim
+# NOTICE.TXT file for boot message
+NOTICE=NOTICE.TXT
 
 all: $(DISKIMG)
 debug: DFLAGS+=DEBUG
@@ -60,16 +61,12 @@ debug: $(DISKIMG)
 %.cim: %.asm $(DEPS)
 	$(MAC) $(MACFLAGS) $<
 
-
-%.COM: $(CLIDEPS)
-	$(MAC) $(MACFLAGS) $<
-	mv $(basename $<).cim $(basename $@).COM
-
 $(DISKIMG): $(SYS) $(BSECT) $(CLI) $(OSFILES)
 	mformat -B $(BSECT) -f 720 -C -i $(DISKIMG)
 	mcopy -i $(DISKIMG) $(SYS) ::
-	mattrib -i $(DISKIMG) +r +h +s $(SYS)
-	mcopy -i $(DISKIMG) $(CLI) ::
+	mattrib -i $(DISKIMG) +r +h +s ::$(SYS)
+	mcopy -i $(DISKIMG) $(CLI) ::CLI.COM
+	mcopy -i $(DISKIMG) $(NOTICE) ::NOTICE.TXT
 ifneq ($(OSFILES),)
 	mcopy -i $(DISKIMG) $(OSFILES) ::
 endif

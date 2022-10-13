@@ -25,6 +25,27 @@
 ;
 
 	maclib	Z80
+; Structure offset equates for DPB
+DPB$SIZ		equ	51	; Total size of structure
+DPB$OFF		equ	11	; Absolute offset from start of sector
+DPB$BYTESPERSEC	equ	0	; (2) Bytes per sector
+DPB$SECPERCLUST	equ	2	; (1) Sectors per cluster
+DPB$RESERVEDSEC	equ	3	; (2) Reserved sectors
+DPB$NUMFATS	equ	5	; (1) Number of FATs
+DPB$ROOTENTCNT	equ	6	; (2) Root Directory Entries
+DPB$TOTSEC16	equ	8	; (2) Total sectors 16-bit value
+DPB$MEDIATYPE	equ	10	; (1) Media type (0xF8 fixed, 0xF0 removable)
+DPB$FATSIZE	equ	11	; (2) Sectors taken by one FAT
+DPB$SECPERTRK	equ	13	; (2) Sectors per track
+DPB$NUMHEADS	equ	15	; (2) Number of heads
+DPB$HIDDSEC	equ	17	; (4) Hidden sectors before partition
+DPB$TOTSEC32	equ	21	; (4) Total sectors 32-bit value
+DPB$DRVNUM	equ	25	; (1) Drive number, 80h or 0
+;RESERVED		26
+DPB$BOOTSIG	equ	27	; (1) Boot sig is 29h
+DPB$VOLID	equ	28	; (4) Volume serial number
+DPB$VOLLABEL	equ	32	; (11) Volume label (11 characters)
+DPB$FILESYSTYPE	equ	43	; (8) File system type 'FAT12   ' etc
 
 ; WDOS commands
 cout	equ	2		; Console out
@@ -39,6 +60,7 @@ search	equ	17		; Search for first file
 next	equ	18		; Search for next file
 readn	equ	20		; Read next
 setdma	equ	26		; Set DMA
+getdpb	equ	31		; Get address of DPB
 
 cdisk	equ	4
 wdos	equ	5
@@ -57,9 +79,12 @@ eof	equ	26		; EOF character marker
 entry:	jmp	init
 
 
-nf:	db	10,"No file",0
+nf:	db	10,"No file$"
+dir1:	db	10,"-- Label: $"
+dir2:	db	" -- Serial: $"
+dir3:	db	" -- Filesystem: $"
 btvec:	dw	0		; Boot vector
-
+dpb:	dw	0		; DBP returned by WDOS Function 1Fh
 curfcb:	db	0		; Current FCB pointed at by state machine (bootstrap, FCB1, FCB2)
 btfcb:	dw	0		; Boot FCB
 xfcb1:	dw	fcb1		; FCB 1
@@ -68,8 +93,7 @@ xfcb2:	dw	fcb2		; FCB 2
 blank:	db	0,"           ",0,0,0,0
 	db	0,"           ",0,0,0,0
 	db	0,0,0,0
-pdir:	db	"        .    : ",0
-
+pdir:	db	"        .    : $"
 	;
 	; This chunk of code is copied below WDOS
 	; to load the transient program.
@@ -192,6 +216,9 @@ cli:	lxi	d, dirsp	; Loading data to here
 	call	upper		; Uppercase that string
 	jz	cli		; No input
 	
+	lxi	h, defdma	; Command tail has 0 length
+	mvi	m, 0
+	
 	lxi	h, cmdbuf+1
 	mov	b, m
 	inx	h		; HL = user string, DE = FCB
@@ -260,6 +287,8 @@ smcont:	ldax	d		; Get current character
 	jrz	dot
 	cpi	':'		; Drive change
 	jrz	drive
+	cpi	'/'		; Switch operator
+	jrz	switch
 	mov	m, a
 	inc	c
 	inx	h
@@ -296,6 +325,21 @@ drive:	mvi	a, 1		; Must be second character (0 based)
 	jr	sm
 	
 	;
+	; Process switch operator
+	; Switch must be followed by space to go back to FCB state
+	;
+switch:	dcx	d		; Include switch character in copy
+	inr	b
+	call	gettail		; Switch can be supplied without whitespace
+
+.1:	ldax	d		; Get current character
+	cpi	'!'		; White space (space and control characters)
+	jrc	sm		; Is whitespace
+	inx	d
+	dcr	b		; Count character
+	jrz	smend		; end state machine at end of line
+	jr	.1		; continue
+	;
 	; Set the default drive
 	;
 setdef:	dcx	h
@@ -308,7 +352,9 @@ setdef:	dcx	h
 
 	
 	; Attempt to execute command
-cmdex:	call	intern
+cmdex:	lxi	h, cli		; Return for internal command
+	push	h		; Return here
+	call	intern
 	jrz	cmdex1		; Found internal command	
 	;
 	; Attempt to load a transient program
@@ -318,6 +364,10 @@ cmdex:	call	intern
 	call	wdos
 	ora	a
 	jnz	nofile		; Error
+	
+	pop	h		; remove CLI from TOS
+	lxi	h, 0		; Return to warm boot when done
+	push	h
 	
 	lhld	btvec		; Get boot vector
 cmdex1:	pchl			; Jump to it
@@ -354,6 +404,10 @@ gettail:
 	push	h
 
 	lxi	h, defdma	; Store length
+	xra	a
+	ora	m		; Command tail already processed?
+	jnz	.1
+	
 	mov	m, b
 	inx	h
 	mov	a, b
@@ -458,8 +512,7 @@ intvec:	dw	dir
 	; If FCB is uninitialized (spaces) it is filled with '?'
 	;
 	;
-dir:	call	lfonly
-	lhld	xfcb1
+dir:	lhld	xfcb1
 	inx	h
 	mov	a, m
 	cpi	' '
@@ -475,6 +528,9 @@ dir:	call	lfonly
 	lded	xfcb1		; Initial search
 	mvi	c, search
 	call	wdos
+	push	psw
+	call	dirhd		; Initialised disk, print DIR header
+	pop	psw
 	ora	a
 	jnz	nofile		; Print message on no-file
 	mvi	b, 6		; Initialise
@@ -505,7 +561,8 @@ dir:	call	lfonly
 	ldir
 	
 	lxi	d, pdir
-	call	printz
+	mvi	c, print
+	call	wdos
 	
 .ndir	lxi	d, fcb1
 	mvi	c, next
@@ -513,6 +570,79 @@ dir:	call	lfonly
 	pop	b
 	jr	.loop		; Loop
 
+dirhd:	mvi	c, getdpb
+	call	wdos
+	shld	dpb
+	lxi	d, DPB$VOLLABEL
+	dad	d
+	
+	lxi	d, cmdbuf	; Store volume label here
+	lxi	b, 11		; Volume label is 11 characters
+	ldir
+	mvi	a, '$'
+	stax	d
+	
+	lxi	d, dir1
+	mvi	c, print
+	call	wdos
+	lxi	d, cmdbuf
+	mvi	c, print
+	call	wdos
+	
+	lhld	dpb
+	lxi	d, DPB$VOLID
+	dad	d
+	lxi	d, cmdbuf
+	mvi	b, 4		; Print 4 bytes
+.dir1:	mov	a, m
+	inx	h
+	call	hex
+	djnz	.dir1
+	
+	mvi	a, '$'
+	stax	d
+	
+	lxi	d, dir2
+	mvi	c, print
+	call	wdos
+	lxi	d, cmdbuf
+	mvi	c, print
+	call	wdos
+	
+	lhld	dpb
+	lxi	d, DPB$FILESYSTYPE
+	dad	d
+	lxi	d, cmdbuf	; Store volume label here
+	lxi	b, 8		; Filesystem type is 8 characters
+	ldir
+	mvi	a, '$'
+	stax	d
+	lxi	d, dir3
+	mvi	c, print
+	call	wdos
+	lxi	d, cmdbuf
+	mvi	c, print
+	call	wdos
+	
+	jmp	crlf
+
+
+	; Convert Acc to a two character hexadecimal string at DE
+hex:	push	psw		; Will use A twice
+	rar			; Shift upper to lower nibble
+	rar
+	rar
+	rar
+	call	.1		; Print it
+	pop	psw		; Restore original Acc
+.1:	ani	00Fh		; Mask off high nibble
+	adi	090h		; Decimal adjust for ASCII
+	daa
+	aci	040h
+	daa
+	stax	d
+	inx	d
+	ret
 	
 	;
 	; Type the file in FCB to the console
@@ -535,6 +665,8 @@ type:	call	lfonly
 	lxi	h, dirsp
 	mvi	b, 128		; 128 characters to print
 .pr:	mov	a, m
+	ora	a
+	rz
 	cpi	eof
 	rz			; Return on EOF character
 	push	b
@@ -550,23 +682,8 @@ type:	call	lfonly
 	jr	.loop		; Continue printing blocks
 	
 nofile:	lxi	d, nf
-	;jmp	printz
-	;ret
-	
-	
-	;
-	; Print a null terminated string
-	;
-printz:	ldax	d
-	inx	d
-	ora	a
-	rz
-	push	d
-	mov	e, a
-	mvi	c, cout
-	call	wdos
-	pop	d
-	jr	printz
+	mvi	c, print
+	jmp	wdos
 
 cmdbuf:	defs	80		; Command line buffer
 dirsp:	defs	128		; Directory search space (DMA)

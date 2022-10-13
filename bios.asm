@@ -47,11 +47,17 @@ WARM	equ	00h
 IOBYTE	equ	03h
 CDISK	equ	04h	;current disk number
 WDOS	equ	05h
+DMA	equ	080h
 
-DPBSIZ	equ	49	; Size in bytes of each DPB
+
+OPENF	equ	15	; Open file
+CLOSEF	equ	16	; Close file
+READN	equ	20	; Read next
 ;
 LF	equ	10
 CR	equ	13
+EOF	equ	26	; EOF character marker
+
 
 CRT$DAT	equ	020h	; console data
 CRT$ST	equ	021h	; console status
@@ -126,7 +132,7 @@ HD$READ	equ	0C1h	; Read command (CHS, ignore common memory start)
 HD$WRIT	equ	0C2h	; Write command
 
 ; DPB offsets
-DPB$SIZ	equ	49	; Size in bytes of each DPB
+DPB$SIZ	equ	64	; Size allocated for each DPB
 DPB$OFF	equ	11	; Offset in bytes of DPB from start of sector
 DPB$BPS equ	0	; Bytes per sector
 DPB$SPC	equ	2	; Sectors per cluster
@@ -167,8 +173,12 @@ boot	lxi	sp, bstack
 	sta	CDISK		; select disk zero
 	mvi	a, 001h		; Init IOBYTE
 	sta	IOBYTE
-	lxi	d, bmesg
-	call	print
+	
+	
+	; Display NOTICE.TXT on cold boot
+	if	REAL
+	call	type
+	endif
 	
 	; Reset the WDOS vectors, load shell.
 wboot	mvi	a, 0C3h		; C3 is JMP
@@ -348,7 +358,7 @@ fsel	lxi	h, 0		; Default error state
 	
 	mov	a, c		; Current disk in acc
 	lxi	h, dpbtab	; Start here
-	lxi	d, DPBSIZ	; Increment by this much
+	lxi	d, DPB$SIZ	; Increment by this much
 .l2	ora	a
 	jrz	.sel2
 	dcr	a
@@ -682,21 +692,45 @@ phex1	ani	00Fh		; Mask off high nibble
 	jmp	conout
 	endif
 	
-	if	NOT REAL
-	; Default FCB to load
-fcbi	db	0,'           '
-	dw	0,0
-	db	0,'           ',
-	dw	0,0,0,0
-fcblen	equ	$-fcbi
+	if	REAL
+	
+	;
+	; Function to print notice banner from
+	; disk if it exists.
+	;
+type:	lxi	d, notice		; Open it
+	mvi	c, OPENF
+	call	DOSORG
+	ora	a
+	rnz			; No file found
+	
+.loop:	lxi	d, notice
+	mvi	c, READN
+	call	DOSORG
+	ora	a
+	rnz
+	lxi	h, DMA
+	mvi	b, 128		; 128 characters to print
+.pr:	mov	a, m
+	ora	a
+	jz	.typex
+	cpi	eof
+	jz	.typex		; Return on EOF character
+	mov	c, a		; Character to print
+	call	conout
+	inx	h
+	djnz	.pr
+	jr	.loop		; Continue printing blocks
+
+.typex:	lxi	d, notice
+	mvi	c, CLOSEF
+	jmp	DOSORG
+
+notice:	db	0,"NOTICE  TXT",0,0,0
+	dw	0,0,0,0,0,0,0,0,0,0
+	db	0
 	endif
 
-	; Boot message
-bmesg:
-        db	cr		; To start NOTICE on blank line
-	incbin	NOTICE.TXT
-	db	0
-	; Boot stack can overwrite banner
 curdpb	dw	0
 	; BIOS Stack
 	dw	0,0,0,0,0,0,0,0
