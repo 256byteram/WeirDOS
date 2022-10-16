@@ -31,17 +31,7 @@
 	;
 	; Open file
 	;
-fopen:	
-	;ifdef	DEBUG
-	;push	b
-	;mvi	c, 'O'
-	;call	conout
-	;call	prfcb
-	;call	prreg
-	;pop	b
-	;endif
-	
-	call	search
+fopen:	call	search
 	rnz
 	lded	param		; User FCB as destination
 	lhld	dmaadr
@@ -50,6 +40,7 @@ fopen:
 	lxi	b, 31		; Copy directory entry from DMA address
 	ldir
 fopena:	lhld	diridx		; Store directory index to FCB
+	dcx	h		; Undo increment for NEXT
 	stx	l, FCBOF
 	mvi	a, 0Fh
 	ana	h
@@ -127,7 +118,9 @@ clearl:	mov	m, a
 	;
 	; Search for first directory entry in FCB
 	;
-search:	call	selfcb		; Select drive from FCB
+search:	xra	a		; Find first non-deleted file
+	sta	erasf
+_search	call	selfcb		; Select drive from FCB
 	rnz
 	lxi	h, 0
 	shld	diridx
@@ -196,10 +189,11 @@ next:	lhld	diridx		; Get current directory number
 	cmp	m		; Compare to directory entry
 	jrz	.nxt		; Match, next character
 	; No match, go to next entry
-.erasd:	lhld	diridx		; Increment directory entry
+.next2:	lhld	diridx		; Increment directory entry
 	inx	h
 	shld	diridx		; Save it
 	jmp	next		; And do it again
+
 .nxt:	inx	d		; Next bytes
 	inx	h
 	djnz	.nextl		; Loop until end of filename
@@ -214,6 +208,11 @@ next:	lhld	diridx		; Get current directory number
 	sta	rval
 	ret
 
+.erasd:	lda	erasf		; Return on erased file?
+	ora	a
+	mvi	a, 0		; Return with no error
+	rnz
+	jr	.next2		; Else continue
 
 	;
 	; Function 13h (19)
@@ -266,12 +265,7 @@ wrrnd:	call	calcr
 	;
 	; Write next record
 	;
-writen:	
-	ifdef	DEBUG
-	call	dmpdma
-	endif
-
-	call	filrec		; Fill buffer with current record
+writen:	call	filrec		; Fill buffer with current record
 	jrz	.1		; Jump if not EOF or error
 	cpi	1
 	sta	rval		; Keep error
@@ -299,7 +293,11 @@ writen:
 	; Function 16h (22)
 	;
 	; Create a file
-create:	call	search		; Overwrite existing file or make new file
+create:	mvi	a, 1		; Overwrite deleted files
+	sta	erasf
+	call	_search		; Overwrite existing file or make new file
+	xra	a
+	sta	erasf
 	lhld	curdir		; Directory offset in in sector
 	lded	datadr		; Data buffer
 	dad	d
@@ -320,6 +318,10 @@ create:	call	search		; Overwrite existing file or make new file
 	call	dflush
 	xra	a		; No error
 	sta	rval		; search also sets rval
+	ldx	a, FCBFL
+	ora	040h		; File changed flag
+	stx	a, FCBFL	; Flags
+	
 	jmp	fopena		; Tidy up FCB and return
 	
 	
@@ -568,29 +570,3 @@ xequal:	ldx	l, FCBLEN	; Divide by 128
 	stx	a, FCBRC	; Store records in this extent
 	ret
 	
-	;
-	; Calculate FCB from FCB's random record entry
-	;
-setrnd:	ldx	l, FCBRN
-	ldx	h, FCBRN+1
-	ldx	e, FCBRN+2
-	mvi	d, 0
-	mov	a, l
-	ani	07Fh		; Bits 6..0
-	stx	a, FCBCR	; Store CR
-	dad	h		; Shift bits left
-	xchg
-	dadc	h
-	xchg
-	mov	a, h		; Reading bits 7..11
-	ani	01Fh		; Bits 4..0
-	stx	a, FCBEX	; Store EX
-	mvi	b, 3		; Shift 3 times (total of 4)
-setrn1:	dad	h
-	xchg
-	dadc	h
-	xchg
-	djnz	setrn1
-	stx	e, FCBS2	; Store S2
-	ret
-

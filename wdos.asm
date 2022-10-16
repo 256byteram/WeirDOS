@@ -205,7 +205,12 @@ jtab:	dw	reload		;  0 00h Warm Boot - wdoswarm.asm
 	dw	fsize		; 35 23h File size - "
 JTOTAL	equ	($-jtab)/2+2
 	
-lstack:	dw	0,0,0,0		; Local stack
+	
+	ifdef	DEBUG
+	; Extra stack space if debugging
+	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	endif
+	dw	0,0,0,0		; Local stack
 	dw	0,0,0,0
 	dw	0,0,0,0
 	dw	0,0,0,0
@@ -249,6 +254,7 @@ rodsk:	dw	0		; Current disks marked read-only MSB=A:
 fatype:	dw	0		; FAT12/16 flag per disk 0=FAT12
 curfat:	db	0		; FAT12/16 Flag for current disk
 ; Directory search data
+erasf:	db	0		; Non-zero stops search on erased file
 curdir:	dw	0		; Current offset within loaded sector
 diridx:	dw	0		; Current directory index (0,1,2...)
 dirmax:	dw	0		; Maximum number of root entries
@@ -257,7 +263,12 @@ dirsec:	dw	0,0		; Current directory sector
 dmaadr:	dw	80h		; DMA address
 
 wdos:	sded	param		; Store parameter pointer
-
+	ifdef	DEBUG
+	ifdef	PRINTALL
+	call	prreg
+	endif
+	endif
+	
 	lxi	h, 0
 	shld	rval		; Default return value
 	sspd	pstack		; Keep user SP
@@ -289,17 +300,29 @@ wdos:	sded	param		; Store parameter pointer
 	; Restore program stack pointer and return via it
 osret:	popiy			; Restore IX/IY
 	popix
+	
+	ifdef	DEBUG
+	ifdef	PRINTALL
+	lhld	rval		; Return value
+	mov	a, l
+	mov	b, h
+	call	prreg
+	call	dbcrlf
+	endif
+	endif
+	
 	lspd	pstack
 	lhld	rval		; Return value
 	mov	a, l
 	mov	b, h
+	
 	ret
 	
 unsupp:	
 	ifdef	DEBUG
 	push	b
 	mvi	c, '!'
-	call	conout
+	call	bugout
 	pop	b
 	call	prreg
 ;		halt
@@ -424,15 +447,17 @@ prfcb:	push	h
 	mvi	b, 11
 .prl:	mov	c, m
 	inx	h
-	call	conout
+	call	bugout
 	djnz	.prl
+	call	dbsp
 
-	lhld	dmaadr
-	mov	a, h
-	call	phex
-	mov	a, l
+	mvi	b, (21h - 0Ch)
+.prl1:	mov	a, m	; EX
+	inx	h
 	call	phex
 	call	dbsp
+	djnz	.prl1	
+	call    dbcrlf
 	
 	pop	psw
 	pop	b
@@ -459,7 +484,7 @@ prreg:	push	h
 .2:	dcx	h
 	djnz	.1
 
-	call    crlf
+	call    dbcrlf
 	pop	psw
 	pop	b
 	pop	d
@@ -479,16 +504,16 @@ phex1:	ani	00Fh		; Mask off high nibble
 	aci	040h
 	daa
 	mov	c, a		; Print it
-	jmp	conout
+	jmp	bugout
 	
 	; Debug CRLF
 dbcrlf:	mvi	c, CR
-	call	conout
+	call	bugout
 	mvi	c, LF
-	jmp	conout
+	jmp	bugout
 
 dbsp:	mvi	c, ' '
-	jmp	conout
+	jmp	bugout
 		
 
 	endif
@@ -536,6 +561,9 @@ seek:	equ	bios+27
 read:	equ	bios+30
 write:	equ	bios+33
 listst:	equ	bios+36
+	ifdef   DEBUG
+bugout:	equ	bios+39
+	endif
 
 
 	end

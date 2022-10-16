@@ -55,7 +55,7 @@ cout:	call	const
 	cpi	CTRLS		; XOFF
 	jrz	.wait
 	cpi	CTRLC		; ^C
-	jmp	exit		; Terminate program
+	jz	exit		; Terminate program
 .1:	lded	param
 	mov	c, e
 	jmp	conout

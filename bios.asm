@@ -160,6 +160,9 @@ wboote	jmp	wboot		; warm start
 	jmp	read		; read disk
 	jmp	write		; write disk
 	jmp	listst		; return list status
+	ifdef   DEBUG	
+	jmp	serout		; Print debug character
+	endif
 
 driver	dw	bdrv, bdrv, bdrv		; Points to available drivers
 
@@ -734,6 +737,10 @@ notice:	db	0,"NOTICE  TXT",0,0,0
 curdpb	dw	0
 	; BIOS Stack
 	dw	0,0,0,0,0,0,0,0
+	ifdef	DEBUG
+	dw	0,0,0,0,0,0,0,0
+	endif
+	
 bstack	equ	$
 
 ; Disk Parameter Blocks and buffers

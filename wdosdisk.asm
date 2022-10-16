@@ -393,9 +393,11 @@ selfcb:	ldx	a, FCBDSK	; Get disk to load from
 .1:	dcr	a		; Decrement for Select
 	lxi	h, disk		; Is selected the same as current disk?
 	cmp	m
-	rz			; Return if same
+	jrnz	.2		; Need to change the disk
+	xra	a		; No error
+	ret			; Return if same
 	
-	push	h
+.2:	push	h
 	push	psw
 	call	dflush		; Flush old buffers
 	call	fflush

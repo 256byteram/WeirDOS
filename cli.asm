@@ -93,7 +93,7 @@ xfcb2:	dw	fcb2		; FCB 2
 blank:	db	0,"           ",0,0,0,0
 	db	0,"           ",0,0,0,0
 	db	0,0,0,0
-pdir:	db	"        .    : $"
+pdir:	db	"        .    : "
 	;
 	; This chunk of code is copied below WDOS
 	; to load the transient program.
@@ -178,7 +178,12 @@ init:	lhld	wdos+1		; Get top of TPA
 	dad	b
 	shld	btfcb		; Keep this location
 	
-cli:	lxi	d, dirsp	; Loading data to here
+cli:	lded	btfcb		; Clear boot FCB (erase old command)
+	lxi	h, bootfcb
+	lxi	b, (bootx-bootfcb)
+	ldir
+
+	lxi	d, dirsp	; Loading data to here
 	mvi	c, setdma
 	call	wdos
 	
@@ -523,8 +528,8 @@ dir:	lhld	xfcb1
 	inx	h
 	djnz	.4
 	
-.3:	;mvi	c, dreset	; Reset disks in case of disk change
-	;call	wdos
+.3:	mvi	c, dreset	; Reset disks in case of disk change
+	call	wdos
 	lded	xfcb1		; Initial search
 	mvi	c, search
 	call	wdos
@@ -560,9 +565,19 @@ dir:	lhld	xfcb1
 	lxi	b, 3
 	ldir
 	
-	lxi	d, pdir
-	mvi	c, print
+	lxi	h, pdir
+	mvi	b, 15
+.pr	mov	e, m
+	inx	h
+	
+	push	h
+	push	b
+	mvi	c, 2
 	call	wdos
+	pop	b
+	pop	h
+	djnz	.pr
+	
 	
 .ndir	lxi	d, fcb1
 	mvi	c, next

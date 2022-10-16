@@ -225,6 +225,7 @@ gclust:	lbcd	index		; Target index to BC
 .2:	inx	d		; Increment current index
 .3:	push	d		; Just need gt/lt/eq, don't need the result
 	xchg			; Subtract BC from DE for compare
+	ora	a		; clear carry
 	dsbc	b		; 
 	xchg
 	pop	d
@@ -234,6 +235,11 @@ gclust:	lbcd	index		; Target index to BC
 	stx	d, FCBIDX+1
 	stx	l, FCBCUR	; Store new cluster associated with index
 	stx	h, FCBCUR+1
+	ifdef	DEBUG
+	ifdef	PRINTFCB
+	call	prfcb
+	endif
+	endif
 	xra	a		; No error
 	ret
 	
@@ -495,18 +501,7 @@ getidx:	lxi	h, bshf		; Block shift factor
 	mov	m, c
 	inx	h
 	mov	m, a
-	
-;	ifdef	DEBUG
-;	mvi	c, '@'
-;	call	conout
-;	lda	index+1
-;	call	phex
-;	lda	index
-;	call	phex
-;	call	prfcb
-;	call	dbcrlf
-;	endif
-	
+
 	xra	a
 	ret
 
